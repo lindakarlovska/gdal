@@ -281,3 +281,9 @@ if (BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/perftests")
   add_subdirectory(perftests)
 endif ()
 # vim: ts=4 sw=4 sts=4 et
+
+# Přidání testovací binárky pro main.cpp
+add_executable(test_ogrmvt /home/linduska/gdal_pokusy/main.cpp)
+
+# Propojení knihovny GDAL s testovací binárkou
+target_link_libraries(test_ogrmvt PRIVATE GDAL::GDAL)

@@ -23,6 +23,7 @@
 
 #include "mvt_tile.h"
 #include "mvtutils.h"
+#include "ogrmvtdb.h"
 
 #include "ogr_geos.h"
 
@@ -3347,12 +3348,10 @@ class OGRMVTWriterDataset final : public GDALDataset
     };
 
     std::vector<std::unique_ptr<OGRMVTWriterLayer>> m_apoLayers;
-    CPLString m_osTempDB;
     mutable std::mutex m_oDBMutex;
     mutable bool m_bWriteFeatureError = false;
     sqlite3_vfs *m_pMyVFS = nullptr;
-    sqlite3 *m_hDB = nullptr;
-    sqlite3_stmt *m_hInsertStmt = nullptr;
+    OGRMVTDBManager *m_poDBManager;
     int m_nMinZoom = 0;
     int m_nMaxZoom = 5;
     double m_dfSimplification = 0.0;
@@ -3365,7 +3364,6 @@ class OGRMVTWriterDataset final : public GDALDataset
     bool m_bGZip = true;
     mutable CPLWorkerThreadPool m_oThreadPool;
     bool m_bThreadPoolOK = false;
-    mutable GIntBig m_nTempTiles = 0;
     CPLString m_osName;
     CPLString m_osDescription;
     CPLString m_osType{"overlay"};
@@ -3643,22 +3641,13 @@ CPLErr OGRMVTWriterDataset::Close()
             if (!CreateOutput())
                 eErr = CE_Failure;
         }
-        if (m_hInsertStmt != nullptr)
-        {
-            sqlite3_finalize(m_hInsertStmt);
-        }
-        if (m_hDB)
-        {
-            sqlite3_close(m_hDB);
-        }
+
+        m_poDBManager->CloseConnection();
+        m_poDBManager->UnlinkFileIfNeeded();
+
         if (m_hDBMBTILES)
         {
             sqlite3_close(m_hDBMBTILES);
-        }
-        if (!m_osTempDB.empty() && !m_bReuseTempFile &&
-            CPLTestBool(CPLGetConfigOption("OGR_MVT_REMOVE_TEMP_FILE", "YES")))
-        {
-            VSIUnlink(m_osTempDB);
         }
 
         if (GDALDataset::Close() != CE_None)
@@ -4325,41 +4314,27 @@ OGRErr OGRMVTWriterDataset::PreGenerateForTileReal(
     oBuffer.assign(static_cast<char *>(pCompressed), nCompressedSize);
     CPLFree(pCompressed);
 
-    const auto InsertIntoDb = [&]()
-    {
-        m_nTempTiles++;
-        sqlite3_bind_int(m_hInsertStmt, 1, nZ);
-        sqlite3_bind_int(m_hInsertStmt, 2, nTileX);
-        sqlite3_bind_int(m_hInsertStmt, 3, nTileY);
-        sqlite3_bind_text(m_hInsertStmt, 4, osTargetName.c_str(), -1,
-                          SQLITE_STATIC);
-        sqlite3_bind_int64(m_hInsertStmt, 5, nSerial);
-        sqlite3_bind_blob(m_hInsertStmt, 6, oBuffer.data(),
-                          static_cast<int>(oBuffer.size()), SQLITE_STATIC);
-        sqlite3_bind_int(m_hInsertStmt, 7,
-                         static_cast<int>(poGPBFeature->getType()));
-        sqlite3_bind_double(m_hInsertStmt, 8, dfAreaOrLength);
-        int rc = sqlite3_step(m_hInsertStmt);
-        sqlite3_reset(m_hInsertStmt);
-        return rc;
-    };
-
-    int rc;
     if (m_bThreadPoolOK)
     {
         std::lock_guard<std::mutex> oLock(m_oDBMutex);
-        rc = InsertIntoDb();
+        if (m_poDBManager->InsertFeature(
+                nZ, nTileX, nTileY, osTargetName, nSerial, oBuffer,
+                static_cast<int>(poGPBFeature->getType()),
+                dfAreaOrLength) != OGRERR_NONE)
+        {
+            return OGRERR_FAILURE;
+        };
     }
     else
     {
-        rc = InsertIntoDb();
+        if (m_poDBManager->InsertFeature(
+                nZ, nTileX, nTileY, osTargetName, nSerial, oBuffer,
+                static_cast<int>(poGPBFeature->getType()),
+                dfAreaOrLength) != OGRERR_NONE)
+        {
+            return OGRERR_FAILURE;
+        };
     }
-
-    if (!(rc == SQLITE_OK || rc == SQLITE_DONE))
-    {
-        return OGRERR_FAILURE;
-    }
-
     return OGRERR_NONE;
 }
 
@@ -4965,8 +4940,8 @@ std::string OGRMVTWriterDataset::EncodeTile(
     sqlite3_bind_int(hStmtLayer, 3, nY);
 
     unsigned nFeaturesInTile = 0;
-    const GIntBig nProgressStep =
-        std::max(static_cast<GIntBig>(1), m_nTempTiles / 10);
+    const GIntBig nProgressStep = std::max(
+        static_cast<GIntBig>(1), m_poDBManager->GetFeatureCount() / 10);
 
     while (nFeaturesInTile < m_nMaxFeatures &&
            sqlite3_step(hStmtLayer) == SQLITE_ROW)
@@ -5027,11 +5002,11 @@ std::string OGRMVTWriterDataset::EncodeTile(
                           nFeaturesInTile);
 
             nTempTilesRead++;
-            if (nTempTilesRead == m_nTempTiles ||
+            if (nTempTilesRead == m_poDBManager->GetFeatureCount() ||
                 (nTempTilesRead % nProgressStep) == 0)
             {
-                const int nPct =
-                    static_cast<int>((100 * nTempTilesRead) / m_nTempTiles);
+                const int nPct = static_cast<int>(
+                    (100 * nTempTilesRead) / m_poDBManager->GetFeatureCount());
                 CPLDebug("MVT", "%d%%...", nPct);
             }
         }
@@ -5105,17 +5080,15 @@ std::string OGRMVTWriterDataset::EncodeTile(
 
         const unsigned nTotalFeaturesInTile =
             std::min(m_nMaxFeatures, nFeaturesInTile);
-        char *pszSQL =
-            sqlite3_mprintf("SELECT layer, feature FROM temp "
-                            "WHERE z = %d AND x = %d AND y = %d ORDER BY "
-                            "area_or_length DESC LIMIT %d",
-                            nZ, nX, nY, nTotalFeaturesInTile);
-        sqlite3_stmt *hTmpStmt = nullptr;
-        CPL_IGNORE_RET_VAL(
-            sqlite3_prepare_v2(m_hDB, pszSQL, -1, &hTmpStmt, nullptr));
-        sqlite3_free(pszSQL);
-        if (!hTmpStmt)
+
+        if (m_poDBManager->PrepareFeatureLimitStmt() != OGRERR_NONE ||
+            m_poDBManager->BindFeatureLimitStmtParams(
+                nZ, nX, nY, nTotalFeaturesInTile) != OGRERR_NONE)
+        {
             return std::string();
+        }
+
+        sqlite3_stmt *hTmpStmt = m_poDBManager->GetFeatureLimitStmt();
 
         class TargetTileLayerProps
         {
@@ -5186,7 +5159,7 @@ std::string OGRMVTWriterDataset::EncodeTile(
                      nY, static_cast<unsigned>(oTileBuffer.size()));
         }
 
-        sqlite3_finalize(hTmpStmt);
+        m_poDBManager->FinalizeFeatureLimitStmt();
     }
 
     return oTileBuffer;
@@ -5266,39 +5239,8 @@ bool OGRMVTWriterDataset::CreateOutput()
 
     CPLDebug("MVT", "Building output file from temporary database...");
 
-    sqlite3_stmt *hStmtZXY = nullptr;
-    CPL_IGNORE_RET_VAL(sqlite3_prepare_v2(
-        m_hDB, "SELECT DISTINCT z, x, y FROM temp ORDER BY z, x, y", -1,
-        &hStmtZXY, nullptr));
-    if (hStmtZXY == nullptr)
+    if (!m_poDBManager->PrepareOutputStmts())
     {
-        CPLError(CE_Failure, CPLE_AppDefined, "Prepared statement failed");
-        return false;
-    }
-
-    sqlite3_stmt *hStmtLayer = nullptr;
-    CPL_IGNORE_RET_VAL(
-        sqlite3_prepare_v2(m_hDB,
-                           "SELECT DISTINCT layer FROM temp "
-                           "WHERE z = ? AND x = ? AND y = ? ORDER BY layer",
-                           -1, &hStmtLayer, nullptr));
-    if (hStmtLayer == nullptr)
-    {
-        CPLError(CE_Failure, CPLE_AppDefined, "Prepared statement failed");
-        sqlite3_finalize(hStmtZXY);
-        return false;
-    }
-    sqlite3_stmt *hStmtRows = nullptr;
-    CPL_IGNORE_RET_VAL(sqlite3_prepare_v2(
-        m_hDB,
-        "SELECT feature FROM temp "
-        "WHERE z = ? AND x = ? AND y = ? AND layer = ? ORDER BY idx",
-        -1, &hStmtRows, nullptr));
-    if (hStmtRows == nullptr)
-    {
-        CPLError(CE_Failure, CPLE_AppDefined, "Prepared statement failed");
-        sqlite3_finalize(hStmtZXY);
-        sqlite3_finalize(hStmtLayer);
         return false;
     }
 
@@ -5313,9 +5255,7 @@ bool OGRMVTWriterDataset::CreateOutput()
         if (hInsertStmt == nullptr)
         {
             CPLError(CE_Failure, CPLE_AppDefined, "Prepared statement failed");
-            sqlite3_finalize(hStmtZXY);
-            sqlite3_finalize(hStmtLayer);
-            sqlite3_finalize(hStmtRows);
+            m_poDBManager->FinalizeOutputStmts();
             return false;
         }
     }
@@ -5324,6 +5264,7 @@ bool OGRMVTWriterDataset::CreateOutput()
     int nLastX = -1;
     bool bRet = true;
     GIntBig nTempTilesRead = 0;
+    sqlite3_stmt *hStmtZXY = m_poDBManager->GetTilesStmt();
 
     while (sqlite3_step(hStmtZXY) == SQLITE_ROW)
     {
@@ -5331,9 +5272,10 @@ bool OGRMVTWriterDataset::CreateOutput()
         int nX = sqlite3_column_int(hStmtZXY, 1);
         int nY = sqlite3_column_int(hStmtZXY, 2);
 
-        std::string oTileBuffer(EncodeTile(nZ, nX, nY, hStmtLayer, hStmtRows,
-                                           oMapLayerProps, oSetLayers,
-                                           nTempTilesRead));
+        std::string oTileBuffer(
+            EncodeTile(nZ, nX, nY, m_poDBManager->GetLayersStmt(),
+                       m_poDBManager->GetFeaturesStmt(), oMapLayerProps,
+                       oSetLayers, nTempTilesRead));
 
         if (oTileBuffer.empty())
         {
@@ -5392,9 +5334,10 @@ bool OGRMVTWriterDataset::CreateOutput()
             break;
         }
     }
-    sqlite3_finalize(hStmtZXY);
-    sqlite3_finalize(hStmtLayer);
-    sqlite3_finalize(hStmtRows);
+    m_poDBManager->FinalizeTilesStmt();
+    m_poDBManager->FinalizeLayersStmt();
+    m_poDBManager->FinalizeFeaturesStmt();
+
     if (hInsertStmt)
         sqlite3_finalize(hInsertStmt);
 
@@ -6085,72 +6028,57 @@ GDALDataset *OGRMVTWriterDataset::Create(const char *pszFilename, int nXSize,
     poDS->m_pMyVFS = OGRSQLiteCreateVFS(nullptr, poDS);
     sqlite3_vfs_register(poDS->m_pMyVFS, 0);
 
-    CPLString osTempDBDefault = CPLString(pszFilename) + ".temp.db";
-    if (STARTS_WITH(osTempDBDefault, "/vsizip/"))
+    // Creation of temporary database
+    OGRMVTDBManager *poDBManager =
+        new OGRMVTDBManager(pszFilename, papszOptions);
+    if (poDBManager == nullptr)
     {
-        osTempDBDefault =
-            CPLString(pszFilename + strlen("/vsizip/")) + ".temp.db";
-    }
-    CPLString osTempDB = CSLFetchNameValueDef(papszOptions, "TEMPORARY_DB",
-                                              osTempDBDefault.c_str());
-    if (!bReuseTempFile)
-        VSIUnlink(osTempDB);
-
-    sqlite3 *hDB = nullptr;
-    if (sqlite3_open_v2(osTempDB, &hDB,
-                        SQLITE_OPEN_READWRITE |
-                            (bReuseTempFile ? 0 : SQLITE_OPEN_CREATE) |
-                            SQLITE_OPEN_NOMUTEX,
-                        poDS->m_pMyVFS->zName) != SQLITE_OK ||
-        hDB == nullptr)
-    {
-        CPLError(CE_Failure, CPLE_FileIO, "Cannot create %s", osTempDB.c_str());
-        delete poDS;
-        sqlite3_close(hDB);
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Failed to create temporary database.");
         return nullptr;
     }
-    poDS->m_osTempDB = osTempDB;
-    poDS->m_hDB = hDB;
-    poDS->m_bReuseTempFile = bReuseTempFile;
+
+    // Initialize temporary db connection
+    if (poDBManager->Initialize(bReuseTempFile) != OGRERR_NONE)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Failed to initialize temporary database.");
+        delete poDBManager;
+        delete poDS;
+        return nullptr;
+    }
+    poDS->m_poDBManager = poDBManager;
 
     // For Unix
-    if (!poDS->m_bReuseTempFile &&
-        CPLTestBool(CPLGetConfigOption("OGR_MVT_REMOVE_TEMP_FILE", "YES")))
-    {
-        VSIUnlink(osTempDB);
-    }
+    poDBManager->UnlinkFileIfNeeded();
 
-    if (poDS->m_bReuseTempFile)
+    if (poDBManager->GetReuseDB())
     {
-        poDS->m_nTempTiles =
-            SQLGetInteger64(hDB, "SELECT COUNT(*) FROM temp", nullptr);
+        poDBManager->UpdateFeatureCount();
     }
     else
     {
-        CPL_IGNORE_RET_VAL(SQLCommand(
-            hDB,
-            "PRAGMA page_size = 4096;"  // 4096: default since sqlite 3.12
-            "PRAGMA synchronous = OFF;"
-            "PRAGMA journal_mode = OFF;"
-            "PRAGMA temp_store = MEMORY;"
-            "CREATE TABLE temp(z INTEGER, x INTEGER, y INTEGER, layer TEXT, "
-            "idx INTEGER, feature BLOB, geomtype INTEGER, area_or_length "
-            "DOUBLE);"
-            "CREATE INDEX temp_index ON temp (z, x, y, layer, idx);"));
+        // Create the temporary table if not reusing the database
+        if (poDBManager->CreateDataTable() != OGRERR_NONE)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Failed to create temp table.");
+            delete poDBManager;
+            delete poDS;
+            return nullptr;
+        }
     }
 
-    sqlite3_stmt *hInsertStmt = nullptr;
-    CPL_IGNORE_RET_VAL(sqlite3_prepare_v2(
-        hDB,
-        "INSERT INTO temp (z,x,y,layer,idx,feature,geomtype,area_or_length) "
-        "VALUES (?,?,?,?,?,?,?,?)",
-        -1, &hInsertStmt, nullptr));
-    if (hInsertStmt == nullptr)
+    // Prepare the insert statement
+    if (poDBManager->PrepareInsertFeatureStmt() != OGRERR_NONE)
     {
+        CPLError(
+            CE_Failure, CPLE_FileIO,
+            "Failed to prepare statement for inserting tiles into temp table.");
+        delete poDBManager;
         delete poDS;
         return nullptr;
     }
-    poDS->m_hInsertStmt = hInsertStmt;
 
     poDS->m_nMinZoom = atoi(CSLFetchNameValueDef(
         papszOptions, "MINZOOM", CPLSPrintf("%d", poDS->m_nMinZoom)));

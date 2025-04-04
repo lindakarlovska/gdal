@@ -3348,6 +3348,7 @@ class OGRMVTWriterDataset final : public GDALDataset
 
     std::vector<std::unique_ptr<OGRMVTWriterLayer>> m_apoLayers;
     CPLString m_osTempDB;
+    std::vector<std::tuple<int, int, int>> m_affectedTiles;
     mutable std::mutex m_oDBMutex;
     mutable bool m_bWriteFeatureError = false;
     sqlite3_vfs *m_pMyVFS = nullptr;
@@ -3596,6 +3597,44 @@ OGRErr OGRMVTWriterLayer::ICreateFeature(OGRFeature *poFeature)
     }
     m_nSerial++;
     return m_poDS->WriteFeature(this, poFeature, m_nSerial, poGeom);
+}
+
+/************************************************************************/
+/*                         DeleteFeature()                              */
+/************************************************************************/
+
+OGRErr OGRMVTWriterLayer::DeleteFeature(GIntBig nFID)
+{
+    std::cout << "OGRMVTWriterLayer::DeleteFeature" << std::endl;
+
+    if (!m_poDS || !m_poDS->m_hDB)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Temporary database is not initialized.");
+        return OGRERR_FAILURE;
+    }
+
+    // Find affected tiles
+    m_poDS->FindAffectedTiles(this, nFID);
+    if (m_poDS->m_affectedTiles.empty())
+    {
+        std::cout << "No tiles found containing the feature with FID " << nFID << std::endl;
+        return OGRERR_NONE;
+    }
+
+    // Delete the feature from the temporary database
+    if (m_poDS->DeleteFeatureFromDb(this, nFID) != OGRERR_NONE)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, 
+                 "Failed to delete feature with FID " << nFID << " from temporary database.");
+        return OGRERR_FAILURE;
+    }
+
+    // Aktualizace počtu prvků ve vrstvě
+    m_oMapLayerNameToFeatureCount[m_osTargetName]--;
+
+
+    // Write info about delete
+    std::cout << "Feature with FID " << nFID << " is going to be deleted from layer " << m_osTargetName << std::endl;
 }
 
 /************************************************************************/
@@ -5245,6 +5284,76 @@ std::string OGRMVTWriterDataset::RecodeTileLowerResolution(
         GZIPCompress(oTileBuffer);
 
     return oTileBuffer;
+}
+
+/************************************************************************/
+/*                         FindAffectedTiles()                          */
+/************************************************************************/
+void OGRMVTWriterDataset::FindAffectedTiles(OGRMVTWriterLayer* poLayer, GIntBig nFID)
+{
+    // Clear previous results
+    m_affectedTiles.clear();
+
+    // Prepare statement if needed
+    if (m_hSelectTilesStmt == nullptr)
+    {
+        const char* pszSQL = "SELECT z, x, y FROM temp WHERE layer_name = ? AND idx = ?;";
+        if (sqlite3_prepare_v2(m_hDB, pszSQL, -1, &m_hSelectTilesStmt, nullptr) != SQLITE_OK)
+        {
+            CPLError(CE_Failure, CPLE_AppDefined,
+                     "Failed to prepare SQL statement: %s", sqlite3_errmsg(m_hDB));
+            m_hSelectTilesStmt = nullptr;
+            return;
+        }
+    }
+
+    // Bind parameters
+    sqlite3_bind_text(m_hSelectTilesStmt, 1, poLayer->m_osTargetName.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_int64(m_hSelectTilesStmt, 2, nFID);
+
+    // Execute and collect results
+    while (sqlite3_step(m_hSelectTilesStmt) == SQLITE_ROW)
+    {
+        int nZoom = sqlite3_column_int(m_hSelectTilesStmt, 0);
+        int nTileX = sqlite3_column_int(m_hSelectTilesStmt, 1);
+        int nTileY = sqlite3_column_int(m_hSelectTilesStmt, 2);
+        m_affectedTiles.emplace_back(nZoom, nTileX, nTileY);
+    }
+
+    // Reset statement for reuse
+    sqlite3_reset(m_hSelectTilesStmt);
+}
+
+/************************************************************************/
+/*                          DeleteFeatureFromDb()                       */
+/************************************************************************/
+OGRErr OGRMVTWriterDataset::DeleteFeatureFromDb(OGRMVTWriterLayer *poLayer, GIntBig nFID)
+{
+    sqlite3_stmt *poStmt = nullptr;
+    const char *pszSQL = "DELETE FROM temp WHERE layer = ? AND idx = ?";
+    int rc = sqlite3_prepare_v2(m_hDB, pszSQL, -1, &poStmt, nullptr);
+    if (rc != SQLITE_OK)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined, "Failed to prepare DELETE statement: %s", sqlite3_errmsg(m_poDB));
+        return OGRERR_FAILURE;
+    }
+
+    sqlite3_bind_text(poStmt, 1, poLayer->m_osTargetName.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_int64(poStmt, 2, nFID);
+
+    rc = sqlite3_step(poStmt);
+    if (rc != SQLITE_DONE)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Failed to execute DELETE statement for feature %lld in layer %s: %s",
+                 nFID, poLayer->m_osTargetName.c_str(), sqlite3_errmsg(m_hDB));
+        sqlite3_finalize(poStmt);
+        return OGRERR_FAILURE;
+    }
+
+    // Finalizace SQL dotazu
+    sqlite3_finalize(poStmt);
+    return OGRERR_NONE;
 }
 
 /************************************************************************/

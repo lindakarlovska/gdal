@@ -1,6 +1,6 @@
 add_gdal_driver(
   TARGET ogr_MVT
-  SOURCES mvt_tile.cpp mvt_tile.h mvtutils.cpp mvtutils.h ogrmvtdataset.cpp
+  SOURCES mvt_tile.cpp mvt_tile.h mvtutils.cpp mvtutils.h geoutils.cpp geoutils.h ogrmvtdataset.cpp
   BUILTIN
   NO_CXX_WFLAGS_EFFCXX
   NO_WFLAG_OLD_STYLE_CAST

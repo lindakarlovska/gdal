@@ -23,6 +23,7 @@
 
 #include "mvt_tile.h"
 #include "mvtutils.h"
+#include "geoutils.h"
 
 #include "ogr_geos.h"
 
@@ -32,23 +33,6 @@
 #include <memory>
 #include <vector>
 #include <set>
-
-const char *SRS_EPSG_3857 =
-    "PROJCS[\"WGS 84 / Pseudo-Mercator\",GEOGCS[\"WGS "
-    "84\",DATUM[\"WGS_1984\",SPHEROID[\"WGS "
-    "84\",6378137,298.257223563,AUTHORITY[\"EPSG\",\"7030\"]],AUTHORITY["
-    "\"EPSG\",\"6326\"]],PRIMEM[\"Greenwich\",0,AUTHORITY[\"EPSG\",\"8901\"]],"
-    "UNIT[\"degree\",0.0174532925199433,AUTHORITY[\"EPSG\",\"9122\"]],"
-    "AUTHORITY[\"EPSG\",\"4326\"]],PROJECTION[\"Mercator_1SP\"],PARAMETER["
-    "\"central_meridian\",0],PARAMETER[\"scale_factor\",1],PARAMETER[\"false_"
-    "easting\",0],PARAMETER[\"false_northing\",0],UNIT[\"metre\",1,AUTHORITY["
-    "\"EPSG\",\"9001\"]],AXIS[\"X\",EAST],AXIS[\"Y\",NORTH],EXTENSION["
-    "\"PROJ4\",\"+proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 "
-    "+x_0=0.0 +y_0=0 +k=1.0 +units=m +nadgrids=@null +wktext  "
-    "+no_defs\"],AUTHORITY[\"EPSG\",\"3857\"]]";
-
-// WebMercator related constants
-constexpr double kmSPHERICAL_RADIUS = 6378137.0;
 
 constexpr int knMAX_FILES_PER_DIR = 10000;
 
@@ -78,22 +62,6 @@ constexpr size_t knMAX_FIELD_NAME_LENGTH = 256;
 #define SQLITE_STATIC ((sqlite3_destructor_type) nullptr)
 
 #endif
-
-/************************************************************************/
-/*                    InitWebMercatorTilingScheme()                     */
-/************************************************************************/
-
-static void InitWebMercatorTilingScheme(OGRSpatialReference *poSRS,
-                                        double &dfTopX, double &dfTopY,
-                                        double &dfTileDim0)
-{
-    constexpr double kmMAX_GM =
-        kmSPHERICAL_RADIUS * M_PI;  // 20037508.342789244
-    poSRS->SetFromUserInput(SRS_EPSG_3857);
-    dfTopX = -kmMAX_GM;
-    dfTopY = kmMAX_GM;
-    dfTileDim0 = 2 * kmMAX_GM;
-}
 
 /************************************************************************/
 /*                           GetCmdId()                                 */
@@ -1928,8 +1896,8 @@ OGRMVTDataset::OGRMVTDataset(GByte *pabyData)
     m_bClip = CPLTestBool(CPLGetConfigOption("OGR_MVT_CLIP", "YES"));
 
     // Default WebMercator tiling scheme
-    InitWebMercatorTilingScheme(m_poSRS, m_dfTopXOrigin, m_dfTopYOrigin,
-                                m_dfTileDim0);
+    MVTGeoUtils::InitWebMercatorTilingScheme(m_poSRS, m_dfTopXOrigin,
+                                             m_dfTopYOrigin, m_dfTileDim0);
 }
 
 /************************************************************************/
@@ -2434,19 +2402,6 @@ static int OGRMVTDriverIdentify(GDALOpenInfo *poOpenInfo)
 }
 
 /************************************************************************/
-/*                     LongLatToSphericalMercator()                     */
-/************************************************************************/
-
-static void LongLatToSphericalMercator(double *x, double *y)
-{
-    double X = kmSPHERICAL_RADIUS * (*x) / 180 * M_PI;
-    double Y =
-        kmSPHERICAL_RADIUS * log(tan(M_PI / 4 + 0.5 * (*y) / 180 * M_PI));
-    *x = X;
-    *y = Y;
-}
-
-/************************************************************************/
 /*                          LoadMetadata()                              */
 /************************************************************************/
 
@@ -2542,37 +2497,6 @@ static bool LoadMetadata(const CPLString &osMetadataFile,
     }
 
     return oVectorLayers.IsValid();
-}
-
-/************************************************************************/
-/*                       ConvertFromWGS84()                             */
-/************************************************************************/
-
-static void ConvertFromWGS84(OGRSpatialReference *poTargetSRS, double &dfX0,
-                             double &dfY0, double &dfX1, double &dfY1)
-{
-    OGRSpatialReference oSRS_EPSG3857;
-    oSRS_EPSG3857.SetFromUserInput(SRS_EPSG_3857);
-
-    if (poTargetSRS->IsSame(&oSRS_EPSG3857))
-    {
-        LongLatToSphericalMercator(&dfX0, &dfY0);
-        LongLatToSphericalMercator(&dfX1, &dfY1);
-    }
-    else
-    {
-        OGRSpatialReference oSRS_EPSG4326;
-        oSRS_EPSG4326.SetFromUserInput(SRS_WKT_WGS84_LAT_LONG);
-        oSRS_EPSG4326.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-        OGRCoordinateTransformation *poCT =
-            OGRCreateCoordinateTransformation(&oSRS_EPSG4326, poTargetSRS);
-        if (poCT)
-        {
-            poCT->Transform(1, &dfX0, &dfY0);
-            poCT->Transform(1, &dfX1, &dfY1);
-            delete poCT;
-        }
-    }
 }
 
 /************************************************************************/
@@ -2866,7 +2790,8 @@ GDALDataset *OGRMVTDataset::OpenDirectory(GDALOpenInfo *poOpenInfo)
             double dfY0 = CPLAtof(aosTokens[1]);
             double dfX1 = CPLAtof(aosTokens[2]);
             double dfY1 = CPLAtof(aosTokens[3]);
-            ConvertFromWGS84(poDS->m_poSRS, dfX0, dfY0, dfX1, dfY1);
+            MVTGeoUtils::ConvertFromWGS84(poDS->m_poSRS, dfX0, dfY0, dfX1,
+                                          dfY1);
             bExtentValid = true;
             sExtent.MinX = dfX0;
             sExtent.MinY = dfY0;
@@ -2886,8 +2811,9 @@ GDALDataset *OGRMVTDataset::OpenDirectory(GDALOpenInfo *poOpenInfo)
             sExtent.MinY = oBoundArray[1].ToDouble();
             sExtent.MaxX = oBoundArray[2].ToDouble();
             sExtent.MaxY = oBoundArray[3].ToDouble();
-            ConvertFromWGS84(poDS->m_poSRS, sExtent.MinX, sExtent.MinY,
-                             sExtent.MaxX, sExtent.MaxY);
+            MVTGeoUtils::ConvertFromWGS84(poDS->m_poSRS, sExtent.MinX,
+                                          sExtent.MinY, sExtent.MaxX,
+                                          sExtent.MaxY);
         }
     }
 
@@ -3405,7 +3331,6 @@ class OGRMVTWriterDataset final : public GDALDataset
                                   const OGRMVTFeatureContent *poFeatureContent,
                                   GIntBig nSerial, const OGRGeometry *poGeom,
                                   const OGREnvelope &sEnvelope) const;
-
     void ConvertToTileCoords(double dfX, double dfY, int &nX, int &nY,
                              double dfTopX, double dfTopY,
                              double dfTileDim) const;
@@ -3608,7 +3533,8 @@ OGRMVTWriterDataset::OGRMVTWriterDataset()
     m_poSRS = new OGRSpatialReference();
     m_poSRS->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
 
-    InitWebMercatorTilingScheme(m_poSRS, m_dfTopX, m_dfTopY, m_dfTileDim0);
+    MVTGeoUtils::InitWebMercatorTilingScheme(m_poSRS, m_dfTopX, m_dfTopY,
+                                             m_dfTileDim0);
 }
 
 /************************************************************************/
@@ -5402,19 +5328,6 @@ bool OGRMVTWriterDataset::CreateOutput()
 }
 
 /************************************************************************/
-/*                     SphericalMercatorToLongLat()                     */
-/************************************************************************/
-
-static void SphericalMercatorToLongLat(double *x, double *y)
-{
-    double lng = *x / kmSPHERICAL_RADIUS / M_PI * 180;
-    double lat =
-        2 * (atan(exp(*y / kmSPHERICAL_RADIUS)) - M_PI / 4) / M_PI * 180;
-    *x = lng;
-    *y = lat;
-}
-
-/************************************************************************/
 /*                          WriteMetadataItem()                         */
 /************************************************************************/
 
@@ -5486,57 +5399,27 @@ bool OGRMVTWriterDataset::GenerateMetadata(
     double dfTopXWebMercator;
     double dfTopYWebMercator;
     double dfTileDim0WebMercator;
-    InitWebMercatorTilingScheme(&oSRS_EPSG3857, dfTopXWebMercator,
-                                dfTopYWebMercator, dfTileDim0WebMercator);
+    MVTGeoUtils::InitWebMercatorTilingScheme(&oSRS_EPSG3857, dfTopXWebMercator,
+                                             dfTopYWebMercator,
+                                             dfTileDim0WebMercator);
+
+    // Check if the standard tiling scheme is used
     const bool bIsStandardTilingScheme =
         m_poSRS->IsSame(&oSRS_EPSG3857) && m_dfTopX == dfTopXWebMercator &&
         m_dfTopY == dfTopYWebMercator && m_dfTileDim0 == dfTileDim0WebMercator;
-    if (bIsStandardTilingScheme)
-    {
-        SphericalMercatorToLongLat(&(m_oEnvelope.MinX), &(m_oEnvelope.MinY));
-        SphericalMercatorToLongLat(&(m_oEnvelope.MaxX), &(m_oEnvelope.MaxY));
-        m_oEnvelope.MinY = std::max(-85.0, m_oEnvelope.MinY);
-        m_oEnvelope.MaxY = std::min(85.0, m_oEnvelope.MaxY);
-    }
-    else
-    {
-        OGRSpatialReference oSRS_EPSG4326;
-        oSRS_EPSG4326.SetFromUserInput(SRS_WKT_WGS84_LAT_LONG);
-        oSRS_EPSG4326.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-        OGRCoordinateTransformation *poCT =
-            OGRCreateCoordinateTransformation(m_poSRS, &oSRS_EPSG4326);
-        if (poCT)
-        {
-            OGRPoint oPoint1(m_oEnvelope.MinX, m_oEnvelope.MinY);
-            oPoint1.transform(poCT);
-            OGRPoint oPoint2(m_oEnvelope.MinX, m_oEnvelope.MaxY);
-            oPoint2.transform(poCT);
-            OGRPoint oPoint3(m_oEnvelope.MaxX, m_oEnvelope.MaxY);
-            oPoint3.transform(poCT);
-            OGRPoint oPoint4(m_oEnvelope.MaxX, m_oEnvelope.MinY);
-            oPoint4.transform(poCT);
-            m_oEnvelope.MinX =
-                std::min(std::min(oPoint1.getX(), oPoint2.getX()),
-                         std::min(oPoint3.getX(), oPoint4.getX()));
-            m_oEnvelope.MinY =
-                std::min(std::min(oPoint1.getY(), oPoint2.getY()),
-                         std::min(oPoint3.getY(), oPoint4.getY()));
-            m_oEnvelope.MaxX =
-                std::max(std::max(oPoint1.getX(), oPoint2.getX()),
-                         std::max(oPoint3.getX(), oPoint4.getX()));
-            m_oEnvelope.MaxY =
-                std::max(std::max(oPoint1.getY(), oPoint2.getY()),
-                         std::max(oPoint3.getY(), oPoint4.getY()));
-            delete poCT;
-        }
-    }
-    const double dfCenterX = (m_oEnvelope.MinX + m_oEnvelope.MaxX) / 2;
-    const double dfCenterY = (m_oEnvelope.MinY + m_oEnvelope.MaxY) / 2;
-    CPLString osCenter(
-        CPLSPrintf("%.7f,%.7f,%d", dfCenterX, dfCenterY, m_nMinZoom));
-    CPLString osBounds(CPLSPrintf("%.7f,%.7f,%.7f,%.7f", m_oEnvelope.MinX,
-                                  m_oEnvelope.MinY, m_oEnvelope.MaxX,
-                                  m_oEnvelope.MaxY));
+
+    // Compute the bounding box based on the tiling scheme
+    OGREnvelope oTransformedEnvelope;
+    bIsStandardTilingScheme
+        ? MVTGeoUtils::ComputeStandardEnvelope(m_oEnvelope,
+                                               oTransformedEnvelope)
+        : MVTGeoUtils::TransformEnvelopeToWGS84(m_oEnvelope, m_poSRS,
+                                                oTransformedEnvelope);
+
+    // Calculate the center and bounds
+    auto osCenter =
+        MVTGeoUtils::ComputeCenter(oTransformedEnvelope, m_nMinZoom);
+    auto osBounds = MVTGeoUtils::ComputeBounds(oTransformedEnvelope);
 
     WriteMetadataItem("name", m_osName, m_hDBMBTILES, oRoot);
     WriteMetadataItem("description", m_osDescription, m_hDBMBTILES, oRoot);

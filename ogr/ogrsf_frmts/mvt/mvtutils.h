@@ -58,6 +58,11 @@
     "  <Option name='TEMPORARY_DB' scope='vector' type='string' description='" \
     "Filename with path for the temporary database'/>"
 
+inline GInt32 GetCmdCountCombined(int nCmdId, int nCount)
+{
+    return (nCmdId & 0x7) | (nCount << 3);
+}
+
 void OGRMVTInitFields(OGRFeatureDefn *poFeatureDefn,
                       const CPLJSONObject &oFields,
                       const CPLJSONArray &oAttributesFromTileStats);

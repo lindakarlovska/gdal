@@ -23,6 +23,7 @@
 
 #include "mvt_tile.h"
 #include "mvtutils.h"
+#include "ogrmvtstorage.h"
 
 #include "ogr_geos.h"
 
@@ -3347,6 +3348,7 @@ class OGRMVTWriterDataset final : public GDALDataset
     };
 
     std::vector<std::unique_ptr<OGRMVTWriterLayer>> m_apoLayers;
+    std::unique_ptr<OGRMVTStorageManager> m_poStorageManager;
     CPLString m_osTempDB;
     mutable std::mutex m_oDBMutex;
     mutable bool m_bWriteFeatureError = false;
@@ -3369,7 +3371,6 @@ class OGRMVTWriterDataset final : public GDALDataset
     CPLString m_osName;
     CPLString m_osDescription;
     CPLString m_osType{"overlay"};
-    sqlite3 *m_hDBMBTILES = nullptr;
     OGREnvelope m_oEnvelope;
     bool m_bMaxTileSizeOptSpecified = false;
     bool m_bMaxFeaturesOptSpecified = false;
@@ -3379,7 +3380,6 @@ class OGRMVTWriterDataset final : public GDALDataset
     std::map<std::string, GIntBig> m_oMapLayerNameToFeatureCount;
     CPLString m_osBounds;
     CPLString m_osCenter;
-    CPLString m_osExtension{"pbf"};
     OGRSpatialReference *m_poSRS = nullptr;
     double m_dfTopX = 0.0;
     double m_dfTopY = 0.0;
@@ -3651,10 +3651,9 @@ CPLErr OGRMVTWriterDataset::Close()
         {
             sqlite3_close(m_hDB);
         }
-        if (m_hDBMBTILES)
-        {
-            sqlite3_close(m_hDBMBTILES);
-        }
+
+        m_poStorageManager->Close();
+
         if (!m_osTempDB.empty() && !m_bReuseTempFile &&
             CPLTestBool(CPLGetConfigOption("OGR_MVT_REMOVE_TEMP_FILE", "YES")))
         {
@@ -5302,26 +5301,6 @@ bool OGRMVTWriterDataset::CreateOutput()
         return false;
     }
 
-    sqlite3_stmt *hInsertStmt = nullptr;
-    if (m_hDBMBTILES)
-    {
-        CPL_IGNORE_RET_VAL(sqlite3_prepare_v2(
-            m_hDBMBTILES,
-            "INSERT INTO tiles(zoom_level, tile_column, tile_row, "
-            "tile_data) VALUES (?,?,?,?)",
-            -1, &hInsertStmt, nullptr));
-        if (hInsertStmt == nullptr)
-        {
-            CPLError(CE_Failure, CPLE_AppDefined, "Prepared statement failed");
-            sqlite3_finalize(hStmtZXY);
-            sqlite3_finalize(hStmtLayer);
-            sqlite3_finalize(hStmtRows);
-            return false;
-        }
-    }
-
-    int nLastZ = -1;
-    int nLastX = -1;
     bool bRet = true;
     GIntBig nTempTilesRead = 0;
 
@@ -5339,50 +5318,9 @@ bool OGRMVTWriterDataset::CreateOutput()
         {
             bRet = false;
         }
-        else if (hInsertStmt)
-        {
-            sqlite3_bind_int(hInsertStmt, 1, nZ);
-            sqlite3_bind_int(hInsertStmt, 2, nX);
-            sqlite3_bind_int(hInsertStmt, 3, (1 << nZ) - 1 - nY);
-            sqlite3_bind_blob(hInsertStmt, 4, oTileBuffer.data(),
-                              static_cast<int>(oTileBuffer.size()),
-                              SQLITE_STATIC);
-            const int rc = sqlite3_step(hInsertStmt);
-            bRet = (rc == SQLITE_OK || rc == SQLITE_DONE);
-            sqlite3_reset(hInsertStmt);
-        }
         else
         {
-            const std::string osZDirname(CPLFormFilenameSafe(
-                GetDescription(), CPLSPrintf("%d", nZ), nullptr));
-            const std::string osXDirname(CPLFormFilenameSafe(
-                osZDirname.c_str(), CPLSPrintf("%d", nX), nullptr));
-            if (nZ != nLastZ)
-            {
-                VSIMkdir(osZDirname.c_str(), 0755);
-                nLastZ = nZ;
-                nLastX = -1;
-            }
-            if (nX != nLastX)
-            {
-                VSIMkdir(osXDirname.c_str(), 0755);
-                nLastX = nX;
-            }
-            const std::string osTileFilename(
-                CPLFormFilenameSafe(osXDirname.c_str(), CPLSPrintf("%d", nY),
-                                    m_osExtension.c_str()));
-            VSILFILE *fpOut = VSIFOpenL(osTileFilename.c_str(), "wb");
-            if (fpOut)
-            {
-                const size_t nRet = VSIFWriteL(oTileBuffer.data(), 1,
-                                               oTileBuffer.size(), fpOut);
-                bRet = (nRet == oTileBuffer.size());
-                VSIFCloseL(fpOut);
-            }
-            else
-            {
-                bRet = false;
-            }
+            bRet = m_poStorageManager->WriteTile(oTileBuffer, nZ, nX, nY);
         }
 
         if (!bRet)
@@ -5395,8 +5333,6 @@ bool OGRMVTWriterDataset::CreateOutput()
     sqlite3_finalize(hStmtZXY);
     sqlite3_finalize(hStmtLayer);
     sqlite3_finalize(hStmtRows);
-    if (hInsertStmt)
-        sqlite3_finalize(hInsertStmt);
 
     bRet &= GenerateMetadata(oSetLayers.size(), oMapLayerProps);
 
@@ -5417,73 +5353,12 @@ static void SphericalMercatorToLongLat(double *x, double *y)
 }
 
 /************************************************************************/
-/*                          WriteMetadataItem()                         */
-/************************************************************************/
-
-template <class T>
-static bool WriteMetadataItemT(const char *pszKey, T value,
-                               const char *pszValueFormat, sqlite3 *hDBMBTILES,
-                               CPLJSONObject &oRoot)
-{
-    if (hDBMBTILES)
-    {
-        char *pszSQL;
-
-        pszSQL = sqlite3_mprintf(
-            CPLSPrintf("INSERT INTO metadata(name, value) VALUES('%%q', '%s')",
-                       pszValueFormat),
-            pszKey, value);
-        OGRErr eErr = SQLCommand(hDBMBTILES, pszSQL);
-        sqlite3_free(pszSQL);
-        return eErr == OGRERR_NONE;
-    }
-    else
-    {
-        oRoot.Add(pszKey, value);
-        return true;
-    }
-}
-
-/************************************************************************/
-/*                          WriteMetadataItem()                         */
-/************************************************************************/
-
-static bool WriteMetadataItem(const char *pszKey, const char *pszValue,
-                              sqlite3 *hDBMBTILES, CPLJSONObject &oRoot)
-{
-    return WriteMetadataItemT(pszKey, pszValue, "%q", hDBMBTILES, oRoot);
-}
-
-/************************************************************************/
-/*                          WriteMetadataItem()                         */
-/************************************************************************/
-
-static bool WriteMetadataItem(const char *pszKey, int nValue,
-                              sqlite3 *hDBMBTILES, CPLJSONObject &oRoot)
-{
-    return WriteMetadataItemT(pszKey, nValue, "%d", hDBMBTILES, oRoot);
-}
-
-/************************************************************************/
-/*                          WriteMetadataItem()                         */
-/************************************************************************/
-
-static bool WriteMetadataItem(const char *pszKey, double dfValue,
-                              sqlite3 *hDBMBTILES, CPLJSONObject &oRoot)
-{
-    return WriteMetadataItemT(pszKey, dfValue, "%.17g", hDBMBTILES, oRoot);
-}
-
-/************************************************************************/
 /*                          GenerateMetadata()                          */
 /************************************************************************/
 
 bool OGRMVTWriterDataset::GenerateMetadata(
     size_t nLayers, const std::map<CPLString, MVTLayerProperties> &oMap)
 {
-    CPLJSONDocument oDoc;
-    CPLJSONObject oRoot = oDoc.GetRoot();
-
     OGRSpatialReference oSRS_EPSG3857;
     double dfTopXWebMercator;
     double dfTopYWebMercator;
@@ -5540,20 +5415,21 @@ bool OGRMVTWriterDataset::GenerateMetadata(
                                   m_oEnvelope.MinY, m_oEnvelope.MaxX,
                                   m_oEnvelope.MaxY));
 
-    WriteMetadataItem("name", m_osName, m_hDBMBTILES, oRoot);
-    WriteMetadataItem("description", m_osDescription, m_hDBMBTILES, oRoot);
-    WriteMetadataItem("version", m_nMetadataVersion, m_hDBMBTILES, oRoot);
-    WriteMetadataItem("minzoom", m_nMinZoom, m_hDBMBTILES, oRoot);
-    WriteMetadataItem("maxzoom", m_nMaxZoom, m_hDBMBTILES, oRoot);
-    WriteMetadataItem("center", !m_osCenter.empty() ? m_osCenter : osCenter,
-                      m_hDBMBTILES, oRoot);
-    WriteMetadataItem("bounds", !m_osBounds.empty() ? m_osBounds : osBounds,
-                      m_hDBMBTILES, oRoot);
-    WriteMetadataItem("type", m_osType, m_hDBMBTILES, oRoot);
-    WriteMetadataItem("format", "pbf", m_hDBMBTILES, oRoot);
-    if (m_hDBMBTILES)
+    m_poStorageManager->WriteMetadataItem("name", m_osName);
+    m_poStorageManager->WriteMetadataItem("description", m_osDescription);
+    m_poStorageManager->WriteMetadataItem("version", m_nMetadataVersion);
+    m_poStorageManager->WriteMetadataItem("minzoom", m_nMinZoom);
+    m_poStorageManager->WriteMetadataItem("maxzoom", m_nMaxZoom);
+    m_poStorageManager->WriteMetadataItem(
+        "center", !m_osCenter.empty() ? m_osCenter : osCenter);
+    m_poStorageManager->WriteMetadataItem(
+        "bounds", !m_osBounds.empty() ? m_osBounds : osBounds);
+    m_poStorageManager->WriteMetadataItem("type", m_osType);
+    m_poStorageManager->WriteMetadataItem("format", "pbf");
+
+    if (m_poStorageManager->IsMBTiles())
     {
-        WriteMetadataItem("scheme", "tms", m_hDBMBTILES, oRoot);
+        m_poStorageManager->WriteMetadataItem("scheme", "tms");
     }
 
     // GDAL extension for custom tiling schemes
@@ -5563,27 +5439,26 @@ bool OGRMVTWriterDataset::GenerateMetadata(
         const char *pszAuthCode = m_poSRS->GetAuthorityCode(nullptr);
         if (pszAuthName && pszAuthCode)
         {
-            WriteMetadataItem("crs",
-                              CPLSPrintf("%s:%s", pszAuthName, pszAuthCode),
-                              m_hDBMBTILES, oRoot);
+            m_poStorageManager->WriteMetadataItem(
+                "crs", CPLSPrintf("%s:%s", pszAuthName, pszAuthCode));
         }
         else
         {
             char *pszWKT = nullptr;
             m_poSRS->exportToWkt(&pszWKT);
-            WriteMetadataItem("crs", pszWKT, m_hDBMBTILES, oRoot);
+            m_poStorageManager->WriteMetadataItem("crs", pszWKT);
             CPLFree(pszWKT);
         }
-        WriteMetadataItem("tile_origin_upper_left_x", m_dfTopX, m_hDBMBTILES,
-                          oRoot);
-        WriteMetadataItem("tile_origin_upper_left_y", m_dfTopY, m_hDBMBTILES,
-                          oRoot);
-        WriteMetadataItem("tile_dimension_zoom_0", m_dfTileDim0, m_hDBMBTILES,
-                          oRoot);
-        WriteMetadataItem("tile_matrix_width_zoom_0", m_nTileMatrixWidth0,
-                          m_hDBMBTILES, oRoot);
-        WriteMetadataItem("tile_matrix_height_zoom_0", m_nTileMatrixHeight0,
-                          m_hDBMBTILES, oRoot);
+        m_poStorageManager->WriteMetadataItem("tile_origin_upper_left_x",
+                                              m_dfTopX);
+        m_poStorageManager->WriteMetadataItem("tile_origin_upper_left_y",
+                                              m_dfTopY);
+        m_poStorageManager->WriteMetadataItem("tile_dimension_zoom_0",
+                                              m_dfTileDim0);
+        m_poStorageManager->WriteMetadataItem("tile_matrix_width_zoom_0",
+                                              m_nTileMatrixWidth0);
+        m_poStorageManager->WriteMetadataItem("tile_matrix_height_zoom_0",
+                                              m_nTileMatrixHeight0);
     }
 
     CPLJSONDocument oJsonDoc;
@@ -5758,16 +5633,10 @@ bool OGRMVTWriterDataset::GenerateMetadata(
         }
     }
 
-    WriteMetadataItem("json", oJsonDoc.SaveAsString().c_str(), m_hDBMBTILES,
-                      oRoot);
+    m_poStorageManager->WriteMetadataItem("json",
+                                          oJsonDoc.SaveAsString().c_str());
 
-    if (m_hDBMBTILES)
-    {
-        return true;
-    }
-
-    return oDoc.Save(
-        CPLFormFilenameSafe(GetDescription(), "metadata.json", nullptr));
+    return m_poStorageManager->SaveMetadata();
 }
 
 /************************************************************************/
@@ -6040,50 +5909,26 @@ GDALDataset *OGRMVTWriterDataset::Create(const char *pszFilename, int nXSize,
         return nullptr;
     }
 
-    const char *pszFormat = CSLFetchNameValue(papszOptions, "FORMAT");
-    const bool bMBTILESExt =
-        EQUAL(CPLGetExtensionSafe(pszFilename).c_str(), "mbtiles");
-    if (pszFormat == nullptr && bMBTILESExt)
-    {
-        pszFormat = "MBTILES";
-    }
-    const bool bMBTILES = pszFormat != nullptr && EQUAL(pszFormat, "MBTILES");
-
     // For debug only
     bool bReuseTempFile =
         CPLTestBool(CPLGetConfigOption("OGR_MVT_REUSE_TEMP_FILE", "NO"));
 
-    if (bMBTILES)
-    {
-        if (!bMBTILESExt)
-        {
-            CPLError(CE_Failure, CPLE_FileIO,
-                     "%s should have mbtiles extension", pszFilename);
-            return nullptr;
-        }
-
-        VSIUnlink(pszFilename);
-    }
-    else
-    {
-        VSIStatBufL sStat;
-        if (VSIStatL(pszFilename, &sStat) == 0)
-        {
-            CPLError(CE_Failure, CPLE_FileIO, "%s already exists", pszFilename);
-            return nullptr;
-        }
-
-        if (VSIMkdir(pszFilename, 0755) != 0)
-        {
-            CPLError(CE_Failure, CPLE_FileIO, "Cannot create directory %s",
-                     pszFilename);
-            return nullptr;
-        }
-    }
-
+    // Create writer dataset
     OGRMVTWriterDataset *poDS = new OGRMVTWriterDataset();
     poDS->m_pMyVFS = OGRSQLiteCreateVFS(nullptr, poDS);
     sqlite3_vfs_register(poDS->m_pMyVFS, 0);
+
+    // Create storage manager
+    poDS->m_poStorageManager = CreateStorageManager(pszFilename, papszOptions);
+
+    // Initialize storage manager
+    if (!poDS->m_poStorageManager->Initialize(poDS->m_pMyVFS->zName))
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Failed to initialize output storage");
+        delete poDS;
+        return nullptr;
+    }
 
     CPLString osTempDBDefault = CPLString(pszFilename) + ".temp.db";
     if (STARTS_WITH(osTempDBDefault, "/vsizip/"))
@@ -6228,14 +6073,12 @@ GDALDataset *OGRMVTWriterDataset::Create(const char *pszFilename, int nXSize,
     poDS->m_bGZip = CPLFetchBool(papszOptions, "COMPRESS", poDS->m_bGZip);
     poDS->m_osBounds = CSLFetchNameValueDef(papszOptions, "BOUNDS", "");
     poDS->m_osCenter = CSLFetchNameValueDef(papszOptions, "CENTER", "");
-    poDS->m_osExtension = CSLFetchNameValueDef(papszOptions, "TILE_EXTENSION",
-                                               poDS->m_osExtension);
 
     const char *pszTilingScheme =
         CSLFetchNameValue(papszOptions, "TILING_SCHEME");
     if (pszTilingScheme)
     {
-        if (bMBTILES)
+        if (poDS->m_poStorageManager->IsMBTiles())
         {
             CPLError(CE_Failure, CPLE_NotSupported,
                      "Custom TILING_SCHEME not supported with MBTILES output");
@@ -6269,35 +6112,6 @@ GDALDataset *OGRMVTWriterDataset::Create(const char *pszFilename, int nXSize,
                      "Expecting EPSG:XXXX,tile_origin_upper_left_x,"
                      "tile_origin_upper_left_y,tile_dimension_zoom_0[,tile_"
                      "matrix_width_zoom_0,tile_matrix_height_zoom_0]");
-            delete poDS;
-            return nullptr;
-        }
-    }
-
-    if (bMBTILES)
-    {
-        if (sqlite3_open_v2(pszFilename, &poDS->m_hDBMBTILES,
-                            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE |
-                                SQLITE_OPEN_NOMUTEX,
-                            poDS->m_pMyVFS->zName) != SQLITE_OK ||
-            poDS->m_hDBMBTILES == nullptr)
-        {
-            CPLError(CE_Failure, CPLE_FileIO, "Cannot create %s", pszFilename);
-            delete poDS;
-            return nullptr;
-        }
-
-        if (SQLCommand(
-                poDS->m_hDBMBTILES,
-                "PRAGMA page_size = 4096;"  // 4096: default since sqlite 3.12
-                "PRAGMA synchronous = OFF;"
-                "PRAGMA journal_mode = OFF;"
-                "PRAGMA temp_store = MEMORY;"
-                "CREATE TABLE metadata (name text, value text);"
-                "CREATE TABLE tiles (zoom_level integer, tile_column integer, "
-                "tile_row integer, tile_data blob, "
-                "UNIQUE (zoom_level, tile_column, tile_row))") != OGRERR_NONE)
-        {
             delete poDS;
             return nullptr;
         }

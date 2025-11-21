@@ -280,4 +280,14 @@ endif()
 if (BUILD_TESTING AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/perftests")
   add_subdirectory(perftests)
 endif ()
+
+# Přidání testovací binárky pro main.cpp
+add_executable(test_ogrmvt /home/linduska/GDAL_MVT_tests/main.cpp)
+
+# target_sources(test_ogrmvt PRIVATE /home/linduska/gdal/ogr/ogrsf_frmts/mvt/ogrmvtdataset.cpp)
+
+target_link_libraries(test_ogrmvt PRIVATE sqlite3)
+
+# Propojení knihovny GDAL s testovací binárkou
+target_link_libraries(test_ogrmvt PRIVATE GDAL::GDAL) 
 # vim: ts=4 sw=4 sts=4 et

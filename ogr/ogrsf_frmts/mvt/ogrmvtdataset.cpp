@@ -1976,34 +1976,45 @@ static int OGRMVTDriverIdentify(GDALOpenInfo *poOpenInfo)
     else
         std::cout << "  Filename: (null)" << std::endl;
 
-    std::cout << "  Access mode: " << (poOpenInfo->eAccess == GA_Update ? "UPDATE" : "READ-ONLY") << std::endl;
+    std::cout << "  Access mode: "
+              << (poOpenInfo->eAccess == GA_Update ? "UPDATE" : "READ-ONLY")
+              << std::endl;
 
     std::cout << "  Open flags: ";
-    if (poOpenInfo->nOpenFlags & GDAL_OF_VECTOR) std::cout << "[VECTOR] ";
-    if (poOpenInfo->nOpenFlags & GDAL_OF_RASTER) std::cout << "[RASTER] ";
-    if (poOpenInfo->nOpenFlags & GDAL_OF_UPDATE) std::cout << "[UPDATE] ";
-    if (poOpenInfo->nOpenFlags & GDAL_OF_INTERNAL) std::cout << "[INTERNAL] ";
+    if (poOpenInfo->nOpenFlags & GDAL_OF_VECTOR)
+        std::cout << "[VECTOR] ";
+    if (poOpenInfo->nOpenFlags & GDAL_OF_RASTER)
+        std::cout << "[RASTER] ";
+    if (poOpenInfo->nOpenFlags & GDAL_OF_UPDATE)
+        std::cout << "[UPDATE] ";
+    if (poOpenInfo->nOpenFlags & GDAL_OF_INTERNAL)
+        std::cout << "[INTERNAL] ";
     std::cout << std::endl;
 
     // Možnosti, pokud jsou
-    if (poOpenInfo->papszOpenOptions) {
+    if (poOpenInfo->papszOpenOptions)
+    {
         std::cout << "  Open options:" << std::endl;
-        for (int i = 0; poOpenInfo->papszOpenOptions[i] != nullptr; i++) {
-            std::cout << "    - " << poOpenInfo->papszOpenOptions[i] << std::endl;
+        for (int i = 0; poOpenInfo->papszOpenOptions[i] != nullptr; i++)
+        {
+            std::cout << "    - " << poOpenInfo->papszOpenOptions[i]
+                      << std::endl;
         }
-    } else {
+    }
+    else
+    {
         std::cout << "  Open options: (none)" << std::endl;
     }
 
-    std::cout << "  Directory: " << (poOpenInfo->bIsDirectory ? "YES" : "NO") << std::endl;
+    std::cout << "  Directory: " << (poOpenInfo->bIsDirectory ? "YES" : "NO")
+              << std::endl;
     std::cout << "====================================" << std::endl;
 
     if (STARTS_WITH_CI(poOpenInfo->pszFilename, "MVT:"))
-    {   
+    {
         std::cout << "true 1" << std::endl;
         return TRUE;
     }
-
 
     if (STARTS_WITH(poOpenInfo->pszFilename, "/vsicurl"))
     {
@@ -2019,7 +2030,8 @@ static int OGRMVTDriverIdentify(GDALOpenInfo *poOpenInfo)
     {
         const std::string osBaseName = CPLGetFilename(poOpenInfo->pszFilename);
 
-        bool bBaseNameIsInteger = CPLGetValueType(osBaseName.c_str()) == CPL_VALUE_INTEGER;
+        bool bBaseNameIsInteger =
+            CPLGetValueType(osBaseName.c_str()) == CPL_VALUE_INTEGER;
 
         if (!bBaseNameIsInteger)
         {
@@ -2681,7 +2693,7 @@ static void ConvertFromWGS84(OGRSpatialReference *poTargetSRS, double &dfX0,
 /*                  OGRMVTWriterDatasetCreateUpdate()                   */
 /************************************************************************/
 // Forward declaration
-static GDALDataset* OGRMVTWriterDatasetCreateUpdate(GDALOpenInfo* poOpenInfo);
+static GDALDataset *OGRMVTWriterDatasetCreateUpdate(GDALOpenInfo *poOpenInfo);
 
 /************************************************************************/
 /*                         OpenDirectory()                              */
@@ -2689,10 +2701,11 @@ static GDALDataset* OGRMVTWriterDatasetCreateUpdate(GDALOpenInfo* poOpenInfo);
 
 GDALDataset *OGRMVTDataset::OpenDirectory(GDALOpenInfo *poOpenInfo)
 {
-    if (poOpenInfo->eAccess == GA_Update) {
-        std::cout << "return OGRMVTWriterDatasetCreateUpdate(poOpenInfo)" << std::endl;
+    if (poOpenInfo->eAccess == GA_Update)
+    {
+        std::cout << "return OGRMVTWriterDatasetCreateUpdate(poOpenInfo)"
+                  << std::endl;
 
-        
         return OGRMVTWriterDatasetCreateUpdate(poOpenInfo);
     }
 
@@ -3070,7 +3083,7 @@ GDALDataset *OGRMVTDataset::Open(GDALOpenInfo *poOpenInfo, bool bRecurseAllowed)
     else
         std::cout << "Je vsigzip \n";
 
-    const char* filenameOnly = CPLGetFilename(osFilename);
+    const char *filenameOnly = CPLGetFilename(osFilename);
     if (strchr(filenameOnly, '.') == nullptr)
         std::cout << "Bez přípony \n";
     else
@@ -3099,7 +3112,8 @@ GDALDataset *OGRMVTDataset::Open(GDALOpenInfo *poOpenInfo, bool bRecurseAllowed)
             strchr((CPLGetFilename(osFilename)), '.') == nullptr &&
             VSIStatL(osFilename, &sStat) == 0 && VSI_ISDIR(sStat.st_mode))
         {
-            std::cout << "filename has no extension and is a directory" << std::endl;
+            std::cout << "filename has no extension and is a directory"
+                      << std::endl;
             GDALOpenInfo oOpenInfo(osFilename, GA_ReadOnly);
             oOpenInfo.papszOpenOptions = poOpenInfo->papszOpenOptions;
             GDALDataset *poDS = OpenDirectory(&oOpenInfo);
@@ -3116,7 +3130,9 @@ GDALDataset *OGRMVTDataset::Open(GDALOpenInfo *poOpenInfo, bool bRecurseAllowed)
              STARTS_WITH(osFilename, "https://")) &&
             CPLGetValueType(CPLGetFilename(osFilename)) == CPL_VALUE_INTEGER)
         {
-            std::cout << "if the filename is an integer, consider it is a directory" << std::endl;
+            std::cout
+                << "if the filename is an integer, consider it is a directory"
+                << std::endl;
             GDALOpenInfo oOpenInfo(osFilename, GA_ReadOnly);
             oOpenInfo.papszOpenOptions = poOpenInfo->papszOpenOptions;
             GDALDataset *poDS = OpenDirectory(&oOpenInfo);
@@ -3450,6 +3466,7 @@ GDALDataset *OGRMVTDataset::Open(GDALOpenInfo *poOpenInfo, bool bRecurseAllowed)
         return nullptr;
     }
 }
+
 #define HAVE_MVT_WRITE_SUPPORT
 
 #ifdef HAVE_MVT_WRITE_SUPPORT
@@ -3511,7 +3528,8 @@ class OGRMVTWriterDataset final : public GDALDataset
     int m_nMetadataVersion = 2;
     int m_nMVTVersion = 2;
     int m_nBuffer = 5 * knDEFAULT_EXTENT / 256;
-    bool m_bGZip = false; //true; pro testovani (bez ukladani konfigurace do temp.db nejde pri updatu tuto hodnotu ziskat, v metadata.json neni)
+    bool m_bGZip =
+        false;  //true; pro testovani (bez ukladani konfigurace do temp.db nejde pri updatu tuto hodnotu ziskat, v metadata.json neni)
     mutable CPLWorkerThreadPool m_oThreadPool;
     bool m_bThreadPoolOK = false;
     mutable GIntBig m_nTempTiles = 0;
@@ -3538,7 +3556,7 @@ class OGRMVTWriterDataset final : public GDALDataset
     int m_nTileMatrixHeight0 =
         1;  // Number of tiles along Y axis at zoom level 0
     bool m_bReuseTempFile = false;  // debug only
-    bool m_bUpdate = false; // if opened in GDAL_OF_UPDATE mode
+    bool m_bUpdate = false;         // if opened in GDAL_OF_UPDATE mode
 
     OGRErr PreGenerateForTile(
         int nZ, int nX, int nY, const CPLString &osTargetName,
@@ -3591,14 +3609,14 @@ class OGRMVTWriterDataset final : public GDALDataset
                std::map<CPLString, MVTLayerProperties> &oMapLayerProps,
                std::set<CPLString> &oSetLayers, GIntBig &nTempTilesRead);
 
+    sqlite3_stmt *PrepareSelectTiles();
+    std::set<std::tuple<int, int, int>>
+    FetchFeatureTiles(OGRMVTWriterLayer *poLayer, GIntBig nFID);
+    sqlite3_stmt *PrepareInsertFeature();
+    sqlite3_stmt *PrepareDeleteByLayer();
+    OGRErr DeleteFeatureByLayer(OGRMVTWriterLayer *poLayer, GIntBig nFID);
 
-    sqlite3_stmt* PrepareSelectTiles();
-    std::set<std::tuple<int, int, int>> FetchFeatureTiles(OGRMVTWriterLayer* poLayer, GIntBig nFID);
-    sqlite3_stmt* PrepareInsertFeature();
-    sqlite3_stmt* PrepareDeleteByLayer();
-    OGRErr DeleteFeatureByLayer(OGRMVTWriterLayer* poLayer, GIntBig nFID);
-
-    bool UpdateTile(const std::string& oTileBuffer, int nZ, int nX, int nY);
+    bool UpdateTile(const std::string &oTileBuffer, int nZ, int nX, int nY);
 
     std::string RecodeTileLowerResolution(int nZ, int nX, int nY, int nExtent,
                                           sqlite3_stmt *hStmtLayer,
@@ -3621,9 +3639,15 @@ class OGRMVTWriterDataset final : public GDALDataset
 
     virtual OGRLayer *GetLayer(int) override;
 
-    bool GetUpdate() const { return m_bUpdate; }
+    bool GetUpdate() const
+    {
+        return m_bUpdate;
+    }
 
-    sqlite3* GetDBHandle() const { return m_hDB; }
+    sqlite3 *GetDBHandle() const
+    {
+        return m_hDB;
+    }
 
     CPLErr Close() override;
 
@@ -3633,8 +3657,7 @@ class OGRMVTWriterDataset final : public GDALDataset
 
     int TestCapability(const char *) override;
 
-    OGRErr DeleteFeature(OGRMVTWriterLayer *poLayer,
-                         GIntBig nSerial);
+    OGRErr DeleteFeature(OGRMVTWriterLayer *poLayer, GIntBig nSerial);
     OGRErr WriteFeature(OGRMVTWriterLayer *poLayer, OGRFeature *poFeature,
                         GIntBig nSerial, OGRGeometry *poGeom);
 
@@ -3642,7 +3665,7 @@ class OGRMVTWriterDataset final : public GDALDataset
                                int nBandsIn, GDALDataType eDT,
                                char **papszOptions);
 
-    static GDALDataset *CreateUpdate(GDALOpenInfo* poOpenInfo);
+    static GDALDataset *CreateUpdate(GDALOpenInfo *poOpenInfo);
 
     OGRSpatialReference *GetSRS()
     {
@@ -3786,9 +3809,9 @@ OGRErr OGRMVTWriterLayer::ICreateFeature(OGRFeature *poFeature)
         std::cout << "We are in the update mode" << std::endl;
         std::cout << m_osTargetName << std::endl;
 
-        const char* sqlQuery = CPLSPrintf(
-            "SELECT MAX(idx) FROM temp WHERE layer = '%s'",
-            m_osTargetName.c_str());
+        const char *sqlQuery =
+            CPLSPrintf("SELECT MAX(idx) FROM temp WHERE layer = '%s'",
+                       m_osTargetName.c_str());
 
         m_nSerial = SQLGetInteger64(m_poDS->GetDBHandle(), sqlQuery, nullptr);
 
@@ -3797,6 +3820,7 @@ OGRErr OGRMVTWriterLayer::ICreateFeature(OGRFeature *poFeature)
     }
 
     m_nSerial++;
+    poFeature->SetFID(m_nSerial);
 
     return m_poDS->WriteFeature(this, poFeature, m_nSerial, poGeom);
 }
@@ -3808,11 +3832,30 @@ OGRErr OGRMVTWriterLayer::ICreateFeature(OGRFeature *poFeature)
 OGRErr OGRMVTWriterLayer::DeleteFeature(GIntBig nFID)
 {
     std::cout << "OGRMVTWriterLayer::DeleteFeature" << std::endl;
-    
+
+    if (!m_poDS->GetUpdate())
+    {
+        CPLError(CE_Failure, CPLE_NotSupported, UNSUPPORTED_OP_READ_ONLY,
+                 "DeleteFeature");
+        return OGRERR_FAILURE;
+    }
+
+    if (nFID == OGRNullFID)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "DeleteFeature(" CPL_FRMT_GIB
+                 ") failed.  Unable to delete features "
+                 "without\n a recognised FID column.",
+                 nFID);
+        return OGRERR_FAILURE;
+    }
+
     OGRErr res = m_poDS->DeleteFeature(this, nFID);
     if (res != OGRERR_NONE)
         return OGRERR_FAILURE;
-    std::cout << "Feature with FID " << nFID << " is going to be deleted from layer " << m_osTargetName << std::endl;
+    std::cout << "Feature with FID " << nFID
+              << " is going to be deleted from layer " << this->m_osTargetName
+              << std::endl;
     return OGRERR_NONE;
 }
 
@@ -3867,7 +3910,7 @@ OGRLayer *OGRMVTWriterDataset::GetLayer(int iLayer)
 CPLErr OGRMVTWriterDataset::Close()
 {
     std::cout << "=== Modified tiles list ===" << std::endl;
-    for (const auto& tile : m_tilesForUpdate)
+    for (const auto &tile : m_tilesForUpdate)
     {
         int z, x, y;
         std::tie(z, x, y) = tile;
@@ -3913,15 +3956,15 @@ CPLErr OGRMVTWriterDataset::Close()
 
         if (m_hInsertStmt != nullptr)
         {
-            sqlite3_finalize(m_hInsertStmt);  
-        }  
+            sqlite3_finalize(m_hInsertStmt);
+        }
         if (m_hSelectTilesStmt != nullptr)
         {
-            sqlite3_finalize(m_hSelectTilesStmt); 
+            sqlite3_finalize(m_hSelectTilesStmt);
         }
         if (m_hDeleteByLayerStmt != nullptr)
         {
-            sqlite3_finalize(m_hDeleteByLayerStmt); 
+            sqlite3_finalize(m_hDeleteByLayerStmt);
         }
         if (m_hDB)
         {
@@ -3936,7 +3979,9 @@ CPLErr OGRMVTWriterDataset::Close()
         {
             std::cout << m_osTempDB.empty() << std::endl;
             std::cout << m_bReuseTempFile << std::endl;
-            std::cout << CPLTestBool(CPLGetConfigOption("OGR_MVT_REMOVE_TEMP_FILE", "YES")) << std::endl;
+            std::cout << CPLTestBool(CPLGetConfigOption(
+                             "OGR_MVT_REMOVE_TEMP_FILE", "YES"))
+                      << std::endl;
             std::cout << "Smazani temp database" << std::endl;
             VSIUnlink(m_osTempDB);
         }
@@ -4409,7 +4454,8 @@ OGRErr OGRMVTWriterDataset::PreGenerateForTileReal(
         }
     };
 
-    std::cout << "if (eGeomType == wkbPoint || eGeomType == wkbMultiPoint)" << std::endl;
+    std::cout << "if (eGeomType == wkbPoint || eGeomType == wkbMultiPoint)"
+              << std::endl;
     if (eGeomType == wkbPoint || eGeomType == wkbMultiPoint)
     {
         if (eGeomToEncodeType == wkbPoint)
@@ -4584,7 +4630,8 @@ OGRErr OGRMVTWriterDataset::PreGenerateForTileReal(
         return OGRERR_NONE;
     }
 
-    std::cout << "for (const auto &pair : poFeatureContent->oValues)" << std::endl;
+    std::cout << "for (const auto &pair : poFeatureContent->oValues)"
+              << std::endl;
     for (const auto &pair : poFeatureContent->oValues)
     {
         std::cout << "Key (field name): " << pair.first << std::endl;
@@ -4600,15 +4647,19 @@ OGRErr OGRMVTWriterDataset::PreGenerateForTileReal(
         }
         else if (val.getType() == MVTTileLayerValue::ValueType::DOUBLE)
         {
-            std::cout << "Value (double): " << val.getDoubleValue() << std::endl;
+            std::cout << "Value (double): " << val.getDoubleValue()
+                      << std::endl;
         }
-        else if (val.getType() == MVTTileLayerValue::ValueType::STRING || val.getType() ==  MVTTileLayerValue::ValueType::STRING_MAX_8)
+        else if (val.getType() == MVTTileLayerValue::ValueType::STRING ||
+                 val.getType() == MVTTileLayerValue::ValueType::STRING_MAX_8)
         {
-            std::cout << "Value (string): " << val.getStringValue() << std::endl;
+            std::cout << "Value (string): " << val.getStringValue()
+                      << std::endl;
         }
         else if (val.getType() == MVTTileLayerValue::ValueType::BOOL)
         {
-            std::cout << "Value (bool): " << (val.getBoolValue() ? "true" : "false") << std::endl;
+            std::cout << "Value (bool): "
+                      << (val.getBoolValue() ? "true" : "false") << std::endl;
         }
         else
         {
@@ -4657,7 +4708,8 @@ OGRErr OGRMVTWriterDataset::PreGenerateForTileReal(
     const auto InsertIntoDb = [&]()
     {
         m_nTempTiles++;
-        std::cout << "=============================================" << std::endl;
+        std::cout << "============================================="
+                  << std::endl;
         std::cout << "InsertToDb" << std::endl;
         std::cout << "m_nTempTiles: " << m_nTempTiles << std::endl;
         std::cout << "nZ: " << nZ << std::endl;
@@ -4665,43 +4717,65 @@ OGRErr OGRMVTWriterDataset::PreGenerateForTileReal(
         std::cout << "nTileY: " << nTileY << std::endl;
         std::cout << "Layer name: " << osTargetName.c_str() << std::endl;
         std::cout << "nSerial: " << nSerial << std::endl;
-        std::cout << "buffer size: " << static_cast<int>(oBuffer.size()) << std::endl;
-        std::cout << "=============================================" << std::endl;
+        std::cout << "buffer size: " << static_cast<int>(oBuffer.size())
+                  << std::endl;
+        std::cout << "============================================="
+                  << std::endl;
 
         int rc;
 
         // Bind values with additional output
         rc = sqlite3_bind_int(m_hInsertStmt, 1, nZ);
         std::cout << "Binding nZ: " << nZ << " -> result: " << rc << std::endl;
-        if (rc != SQLITE_OK) goto bind_error;
+        if (rc != SQLITE_OK)
+            goto bind_error;
 
         rc = sqlite3_bind_int(m_hInsertStmt, 2, nTileX);
-        std::cout << "Binding nTileX: " << nTileX << " -> result: " << rc << std::endl;
-        if (rc != SQLITE_OK) goto bind_error;
+        std::cout << "Binding nTileX: " << nTileX << " -> result: " << rc
+                  << std::endl;
+        if (rc != SQLITE_OK)
+            goto bind_error;
 
         rc = sqlite3_bind_int(m_hInsertStmt, 3, nTileY);
-        std::cout << "Binding nTileY: " << nTileY << " -> result: " << rc << std::endl;
-        if (rc != SQLITE_OK) goto bind_error;
+        std::cout << "Binding nTileY: " << nTileY << " -> result: " << rc
+                  << std::endl;
+        if (rc != SQLITE_OK)
+            goto bind_error;
 
-        rc = sqlite3_bind_text(m_hInsertStmt, 4, osTargetName.c_str(), -1, SQLITE_STATIC);
-        std::cout << "Binding osTargetName: " << osTargetName.c_str() << " -> result: " << rc << std::endl;
-        if (rc != SQLITE_OK) goto bind_error;
+        rc = sqlite3_bind_text(m_hInsertStmt, 4, osTargetName.c_str(), -1,
+                               SQLITE_STATIC);
+        std::cout << "Binding osTargetName: " << osTargetName.c_str()
+                  << " -> result: " << rc << std::endl;
+        if (rc != SQLITE_OK)
+            goto bind_error;
 
         rc = sqlite3_bind_int64(m_hInsertStmt, 5, nSerial);
-        std::cout << "Binding nSerial: " << nSerial << " -> result: " << rc << std::endl;
-        if (rc != SQLITE_OK) goto bind_error;
+        std::cout << "Binding nSerial: " << nSerial << " -> result: " << rc
+                  << std::endl;
+        if (rc != SQLITE_OK)
+            goto bind_error;
 
-        rc = sqlite3_bind_blob(m_hInsertStmt, 6, oBuffer.data(), static_cast<int>(oBuffer.size()), SQLITE_STATIC);
-        std::cout << "Binding oBuffer size: " << static_cast<int>(oBuffer.size()) << " -> result: " << rc << std::endl;
-        if (rc != SQLITE_OK) goto bind_error;
+        rc = sqlite3_bind_blob(m_hInsertStmt, 6, oBuffer.data(),
+                               static_cast<int>(oBuffer.size()), SQLITE_STATIC);
+        std::cout << "Binding oBuffer size: "
+                  << static_cast<int>(oBuffer.size()) << " -> result: " << rc
+                  << std::endl;
+        if (rc != SQLITE_OK)
+            goto bind_error;
 
-        rc = sqlite3_bind_int(m_hInsertStmt, 7, static_cast<int>(poGPBFeature->getType()));
-        std::cout << "Binding feature type: " << static_cast<int>(poGPBFeature->getType()) << " -> result: " << rc << std::endl;
-        if (rc != SQLITE_OK) goto bind_error;
+        rc = sqlite3_bind_int(m_hInsertStmt, 7,
+                              static_cast<int>(poGPBFeature->getType()));
+        std::cout << "Binding feature type: "
+                  << static_cast<int>(poGPBFeature->getType())
+                  << " -> result: " << rc << std::endl;
+        if (rc != SQLITE_OK)
+            goto bind_error;
 
         rc = sqlite3_bind_double(m_hInsertStmt, 8, dfAreaOrLength);
-        std::cout << "Binding dfAreaOrLength: " << dfAreaOrLength << " -> result: " << rc << std::endl;
-        if (rc != SQLITE_OK) goto bind_error;
+        std::cout << "Binding dfAreaOrLength: " << dfAreaOrLength
+                  << " -> result: " << rc << std::endl;
+        if (rc != SQLITE_OK)
+            goto bind_error;
 
         rc = sqlite3_step(m_hInsertStmt);
         std::cout << "sqlite3_step result: " << rc << std::endl;
@@ -4709,9 +4783,11 @@ OGRErr OGRMVTWriterDataset::PreGenerateForTileReal(
         return rc;
 
     bind_error:
-        std::cerr << "SQLite bind error (code " << rc << "): " << sqlite3_errmsg(m_hDB) << std::endl;
+        std::cerr << "SQLite bind error (code " << rc
+                  << "): " << sqlite3_errmsg(m_hDB) << std::endl;
         sqlite3_reset(m_hInsertStmt);
-        std::cout << "=============================================" << std::endl;
+        std::cout << "============================================="
+                  << std::endl;
         return rc;
     };
 
@@ -4728,7 +4804,8 @@ OGRErr OGRMVTWriterDataset::PreGenerateForTileReal(
 
     if (!(rc == SQLITE_OK || rc == SQLITE_DONE))
     {
-        std::cout << "SQLITE FAILURE (code " << rc << "): " << sqlite3_errmsg(m_hDB) << std::endl;
+        std::cout << "SQLITE FAILURE (code " << rc
+                  << "): " << sqlite3_errmsg(m_hDB) << std::endl;
         return OGRERR_FAILURE;
     }
 
@@ -4736,10 +4813,8 @@ OGRErr OGRMVTWriterDataset::PreGenerateForTileReal(
     if (GetUpdate())
     {
         m_tilesForUpdate.insert(std::make_tuple(nZ, nTileX, nTileY));
-        std::cout << "[Modified tile] Z: " << nZ
-                << " X: " << nTileX
-                << " Y: " << nTileY
-                << std::endl;
+        std::cout << "[Modified tile] Z: " << nZ << " X: " << nTileX
+                  << " Y: " << nTileY << std::endl;
     }
 
     return OGRERR_NONE;
@@ -4796,7 +4871,8 @@ OGRErr OGRMVTWriterDataset::PreGenerateForTile(
 {
     if (!m_bThreadPoolOK)
     {
-        std::cout << "z PreGenerateForTile volan PreGenerateForTileReal" << std::endl;
+        std::cout << "z PreGenerateForTile volan PreGenerateForTileReal"
+                  << std::endl;
         return PreGenerateForTileReal(
             nZ, nTileX, nTileY, osTargetName, bIsMaxZoomForLayer,
             poFeatureContent.get(), nSerial, poGeom.get(), sEnvelope);
@@ -4820,7 +4896,8 @@ OGRErr OGRMVTWriterDataset::PreGenerateForTile(
         m_oThreadPool.WaitCompletion(1000);
 
         std::lock_guard oLock(m_oDBMutex);
-        std::cout << "m_bWriteFeatureError: " << m_bWriteFeatureError << std::endl;
+        std::cout << "m_bWriteFeatureError: " << m_bWriteFeatureError
+                  << std::endl;
         return m_bWriteFeatureError ? OGRERR_FAILURE : OGRERR_NONE;
     }
 }
@@ -5640,16 +5717,19 @@ std::string OGRMVTWriterDataset::RecodeTileLowerResolution(
 /************************************************************************/
 /*                         PrepareSelectTiles()                         */
 /************************************************************************/
-sqlite3_stmt* OGRMVTWriterDataset::PrepareSelectTiles()
+sqlite3_stmt *OGRMVTWriterDataset::PrepareSelectTiles()
 {
     std::cout << "OGRMVTWriterDataset::PrepareSelectTiles" << std::endl;
 
-    const char* pszSQL = "SELECT z, x, y FROM temp WHERE layer = ? AND idx = ?;";
-    sqlite3_stmt* stmt = nullptr;
+    const char *pszSQL =
+        "SELECT z, x, y FROM temp WHERE layer = ? AND idx = ?;";
+    sqlite3_stmt *stmt = nullptr;
 
-    if (sqlite3_prepare_v2(m_hDB, pszSQL, -1, &stmt, nullptr) != SQLITE_OK) {
+    if (sqlite3_prepare_v2(m_hDB, pszSQL, -1, &stmt, nullptr) != SQLITE_OK)
+    {
         CPLError(CE_Failure, CPLE_AppDefined,
-                 "Failed to prepare SELECT statement: %s", sqlite3_errmsg(m_hDB));
+                 "Failed to prepare SELECT statement: %s",
+                 sqlite3_errmsg(m_hDB));
         return nullptr;
     }
 
@@ -5659,27 +5739,34 @@ sqlite3_stmt* OGRMVTWriterDataset::PrepareSelectTiles()
 /************************************************************************/
 /*                         FetchFeatureTiles()                          */
 /************************************************************************/
-std::set<std::tuple<int, int, int>> OGRMVTWriterDataset::FetchFeatureTiles(OGRMVTWriterLayer* poLayer, GIntBig nFID)
+std::set<std::tuple<int, int, int>>
+OGRMVTWriterDataset::FetchFeatureTiles(OGRMVTWriterLayer *poLayer, GIntBig nFID)
 {
     std::cout << "OGRMVTWriterDataset::FetchFeatureTiles" << std::endl;
 
     std::set<std::tuple<int, int, int>> tiles;
 
-    if (m_hDB == nullptr) {
-        CPLError(CE_Failure, CPLE_AppDefined, "Database connection is not initialized.");
+    if (m_hDB == nullptr)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Database connection is not initialized.");
         return tiles;
     }
 
-    if (m_hSelectTilesStmt == nullptr) {
+    if (m_hSelectTilesStmt == nullptr)
+    {
         m_hSelectTilesStmt = PrepareSelectTiles();
-        if (m_hSelectTilesStmt == nullptr) {
+        if (m_hSelectTilesStmt == nullptr)
+        {
             return tiles;
         }
     }
-    sqlite3_bind_text(m_hSelectTilesStmt, 1, poLayer->m_osTargetName.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(m_hSelectTilesStmt, 1, poLayer->m_osTargetName.c_str(),
+                      -1, SQLITE_STATIC);
     sqlite3_bind_int64(m_hSelectTilesStmt, 2, nFID);
 
-    while (sqlite3_step(m_hSelectTilesStmt) == SQLITE_ROW) {
+    while (sqlite3_step(m_hSelectTilesStmt) == SQLITE_ROW)
+    {
         int nZoom = sqlite3_column_int(m_hSelectTilesStmt, 0);
         int nTileX = sqlite3_column_int(m_hSelectTilesStmt, 1);
         int nTileY = sqlite3_column_int(m_hSelectTilesStmt, 2);
@@ -5694,19 +5781,22 @@ std::set<std::tuple<int, int, int>> OGRMVTWriterDataset::FetchFeatureTiles(OGRMV
 /************************************************************************/
 /*                         PrepareInsertFeature()                       */
 /************************************************************************/
-sqlite3_stmt* OGRMVTWriterDataset::PrepareInsertFeature() 
+sqlite3_stmt *OGRMVTWriterDataset::PrepareInsertFeature()
 {
     std::cout << "OGRMVTWriterDataset::PrepareInsertFeature" << std::endl;
 
-    const char* pszSQL = 
-        "INSERT INTO temp (z, x, y, layer, idx, feature, geomtype, area_or_length) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
-    
-    sqlite3_stmt* insertStmt = nullptr;
+    const char *pszSQL = "INSERT INTO temp (z, x, y, layer, idx, feature, "
+                         "geomtype, area_or_length) "
+                         "VALUES (?, ?, ?, ?, ?, ?, ?, ?)";
 
-    if (sqlite3_prepare_v2(m_hDB, pszSQL, -1, &insertStmt, nullptr) != SQLITE_OK) {
+    sqlite3_stmt *insertStmt = nullptr;
+
+    if (sqlite3_prepare_v2(m_hDB, pszSQL, -1, &insertStmt, nullptr) !=
+        SQLITE_OK)
+    {
         CPLError(CE_Failure, CPLE_AppDefined,
-                 "Failed to prepare INSERT statement: %s", sqlite3_errmsg(m_hDB));
+                 "Failed to prepare INSERT statement: %s",
+                 sqlite3_errmsg(m_hDB));
         return nullptr;
     }
 
@@ -5716,16 +5806,19 @@ sqlite3_stmt* OGRMVTWriterDataset::PrepareInsertFeature()
 /************************************************************************/
 /*                         PrepareDeleteByLayer()                       */
 /************************************************************************/
-sqlite3_stmt* OGRMVTWriterDataset::PrepareDeleteByLayer() 
+sqlite3_stmt *OGRMVTWriterDataset::PrepareDeleteByLayer()
 {
     std::cout << "OGRMVTWriterDataset::PrepareDeleteByLayer" << std::endl;
 
-    const char* pszSQL = "DELETE FROM temp WHERE layer = ? AND idx = ?";
-    sqlite3_stmt* deleteByLayerStmt = nullptr;
+    const char *pszSQL = "DELETE FROM temp WHERE layer = ? AND idx = ?";
+    sqlite3_stmt *deleteByLayerStmt = nullptr;
 
-    if (sqlite3_prepare_v2(m_hDB, pszSQL, -1, &deleteByLayerStmt, nullptr) != SQLITE_OK) {
+    if (sqlite3_prepare_v2(m_hDB, pszSQL, -1, &deleteByLayerStmt, nullptr) !=
+        SQLITE_OK)
+    {
         CPLError(CE_Failure, CPLE_AppDefined,
-                 "Failed to prepare DELETE statement: %s", sqlite3_errmsg(m_hDB));
+                 "Failed to prepare DELETE statement: %s",
+                 sqlite3_errmsg(m_hDB));
         return nullptr;
     }
     return deleteByLayerStmt;
@@ -5734,32 +5827,39 @@ sqlite3_stmt* OGRMVTWriterDataset::PrepareDeleteByLayer()
 /************************************************************************/
 /*                         DeleteFeaturebyLayer()                       */
 /************************************************************************/
-OGRErr OGRMVTWriterDataset::DeleteFeatureByLayer(OGRMVTWriterLayer* poLayer, GIntBig featureId) 
+OGRErr OGRMVTWriterDataset::DeleteFeatureByLayer(OGRMVTWriterLayer *poLayer,
+                                                 GIntBig featureId)
 {
     std::cout << "OGRMVTWriterDataset::DeleteFeatureByLayer" << std::endl;
 
-    if (m_hDB == nullptr) {
-        CPLError(CE_Failure, CPLE_AppDefined, "Database connection is not initialized.");
+    if (m_hDB == nullptr)
+    {
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Database connection is not initialized.");
         return OGRERR_FAILURE;
     }
 
-    if (m_hDeleteByLayerStmt == nullptr) {
+    if (m_hDeleteByLayerStmt == nullptr)
+    {
         m_hDeleteByLayerStmt = PrepareDeleteByLayer();
-        if (m_hDeleteByLayerStmt == nullptr) {
+        if (m_hDeleteByLayerStmt == nullptr)
+        {
             return OGRERR_FAILURE;
         }
     }
 
-    sqlite3_bind_text(m_hDeleteByLayerStmt, 1, poLayer->m_osTargetName.c_str(), -1, SQLITE_STATIC);
+    sqlite3_bind_text(m_hDeleteByLayerStmt, 1, poLayer->m_osTargetName.c_str(),
+                      -1, SQLITE_STATIC);
     sqlite3_bind_int64(m_hDeleteByLayerStmt, 2, featureId);
 
     int rc = sqlite3_step(m_hDeleteByLayerStmt);
-    if (rc != SQLITE_DONE) {
+    if (rc != SQLITE_DONE)
+    {
         sqlite3_reset(m_hDeleteByLayerStmt);
         return OGRERR_FAILURE;
     }
 
-    const char* sqlQuery = "SELECT COUNT(*) FROM temp";
+    const char *sqlQuery = "SELECT COUNT(*) FROM temp";
     m_nTempTiles = SQLGetInteger64(m_hDB, sqlQuery, nullptr);
 
     sqlite3_reset(m_hDeleteByLayerStmt);
@@ -5769,8 +5869,8 @@ OGRErr OGRMVTWriterDataset::DeleteFeatureByLayer(OGRMVTWriterLayer* poLayer, GIn
 /************************************************************************/
 /*                         UpdateTile()                                 */
 /************************************************************************/
-bool OGRMVTWriterDataset::UpdateTile(const std::string &oTileBuffer,
-                                     int nZ, int nX, int nY)
+bool OGRMVTWriterDataset::UpdateTile(const std::string &oTileBuffer, int nZ,
+                                     int nX, int nY)
 {
     std::cout << "UpdateTile vevnitr" << std::endl;
     bool bRet = true;
@@ -5780,10 +5880,11 @@ bool OGRMVTWriterDataset::UpdateTile(const std::string &oTileBuffer,
         std::cout << "UpdateTile m_hDBMBTILES" << std::endl;
 
         sqlite3_stmt *hUpdateStmt = nullptr;
-        CPL_IGNORE_RET_VAL(sqlite3_prepare_v2(
-            m_hDBMBTILES,
-            "REPLACE INTO tiles(zoom_level, tile_column, tile_row, tile_data) VALUES (?,?,?,?)",
-            -1, &hUpdateStmt, nullptr));
+        CPL_IGNORE_RET_VAL(
+            sqlite3_prepare_v2(m_hDBMBTILES,
+                               "REPLACE INTO tiles(zoom_level, tile_column, "
+                               "tile_row, tile_data) VALUES (?,?,?,?)",
+                               -1, &hUpdateStmt, nullptr));
 
         if (hUpdateStmt == nullptr)
         {
@@ -5810,17 +5911,22 @@ bool OGRMVTWriterDataset::UpdateTile(const std::string &oTileBuffer,
 
         std::cout << "DEBUG m_osExtension: " << m_osExtension << std::endl;
 
-        CPLString osZDirname(CPLFormFilenameSafe(GetDescription(), CPLSPrintf("%d", nZ), nullptr));
-        CPLString osXDirname(CPLFormFilenameSafe(osZDirname, CPLSPrintf("%d", nX), nullptr));
+        CPLString osZDirname(CPLFormFilenameSafe(
+            GetDescription(), CPLSPrintf("%d", nZ), nullptr));
+        CPLString osXDirname(
+            CPLFormFilenameSafe(osZDirname, CPLSPrintf("%d", nX), nullptr));
 
         VSIStatBufL sStatBuf;
-        if (VSIStatL(osXDirname, &sStatBuf) != 0 || !VSI_ISDIR(sStatBuf.st_mode))
+        if (VSIStatL(osXDirname, &sStatBuf) != 0 ||
+            !VSI_ISDIR(sStatBuf.st_mode))
         {
-            std::cout << "Directory " << osXDirname << " does not exist. Creating...\n";
+            std::cout << "Directory " << osXDirname
+                      << " does not exist. Creating...\n";
             if (VSIMkdirRecursive(osXDirname, 0755) != 0)
             {
                 CPLError(CE_Failure, CPLE_AppDefined,
-                        "Failed to create directory structure: %s", osXDirname.c_str());
+                         "Failed to create directory structure: %s",
+                         osXDirname.c_str());
                 return false;
             }
         }
@@ -5832,7 +5938,8 @@ bool OGRMVTWriterDataset::UpdateTile(const std::string &oTileBuffer,
         if (!fpOut)
         {
             CPLError(CE_Failure, CPLE_AppDefined,
-                    "Failed to open file %s for writing", osTileFilename.c_str());
+                     "Failed to open file %s for writing",
+                     osTileFilename.c_str());
             return false;
         }
 
@@ -5843,7 +5950,8 @@ bool OGRMVTWriterDataset::UpdateTile(const std::string &oTileBuffer,
         }
         std::cout << std::endl;
 
-        const size_t nRet = VSIFWriteL(oTileBuffer.data(), 1, oTileBuffer.size(), fpOut);
+        const size_t nRet =
+            VSIFWriteL(oTileBuffer.data(), 1, oTileBuffer.size(), fpOut);
         bRet = (nRet == oTileBuffer.size());
         VSIFCloseL(fpOut);
     }
@@ -6028,23 +6136,29 @@ bool OGRMVTWriterDataset::UpdateOutput()
 
     CPLDebug("MVT", "Updating output file from temporary database...");
 
-    const char* pszSQLLayer = 
-        "SELECT DISTINCT layer FROM temp WHERE z = ? AND x = ? AND y = ? ORDER BY layer;";
-    sqlite3_stmt* hStmtLayer = nullptr;
+    const char *pszSQLLayer = "SELECT DISTINCT layer FROM temp WHERE z = ? AND "
+                              "x = ? AND y = ? ORDER BY layer;";
+    sqlite3_stmt *hStmtLayer = nullptr;
 
-    if (sqlite3_prepare_v2(m_hDB, pszSQLLayer, -1, &hStmtLayer, nullptr) != SQLITE_OK) {
+    if (sqlite3_prepare_v2(m_hDB, pszSQLLayer, -1, &hStmtLayer, nullptr) !=
+        SQLITE_OK)
+    {
         CPLError(CE_Failure, CPLE_AppDefined,
-                "Failed to prepare SELECT DISTINCT layer statement: %s", sqlite3_errmsg(m_hDB));
+                 "Failed to prepare SELECT DISTINCT layer statement: %s",
+                 sqlite3_errmsg(m_hDB));
         return false;
     }
 
-    const char* pszSQLRows = 
-        "SELECT feature FROM temp WHERE z = ? AND x = ? AND y = ? AND layer = ? ORDER BY idx;";
-    sqlite3_stmt* hStmtRows = nullptr;
+    const char *pszSQLRows = "SELECT feature FROM temp WHERE z = ? AND x = ? "
+                             "AND y = ? AND layer = ? ORDER BY idx;";
+    sqlite3_stmt *hStmtRows = nullptr;
 
-    if (sqlite3_prepare_v2(m_hDB, pszSQLRows, -1, &hStmtRows, nullptr) != SQLITE_OK) {
+    if (sqlite3_prepare_v2(m_hDB, pszSQLRows, -1, &hStmtRows, nullptr) !=
+        SQLITE_OK)
+    {
         CPLError(CE_Failure, CPLE_AppDefined,
-                "Failed to prepare SELECT feature statement: %s", sqlite3_errmsg(m_hDB));
+                 "Failed to prepare SELECT feature statement: %s",
+                 sqlite3_errmsg(m_hDB));
         return false;
     }
 
@@ -6053,13 +6167,14 @@ bool OGRMVTWriterDataset::UpdateOutput()
     std::map<CPLString, MVTLayerProperties> oMapLayerProps;
     std::set<CPLString> oSetLayers;
 
-    for (const auto& [nZ, nX, nY] : m_tilesForUpdate)
+    for (const auto &[nZ, nX, nY] : m_tilesForUpdate)
     {
         std::cout << nZ << std::endl;
         std::cout << nX << std::endl;
         std::cout << nY << std::endl;
-        std::string oTileBuffer = EncodeTile(nZ, nX, nY, hStmtLayer, hStmtRows,
-                                                     oMapLayerProps, oSetLayers, nTempTilesRead);
+        std::string oTileBuffer =
+            EncodeTile(nZ, nX, nY, hStmtLayer, hStmtRows, oMapLayerProps,
+                       oSetLayers, nTempTilesRead);
 
         if (oTileBuffer.empty())
         {
@@ -6461,7 +6576,7 @@ bool OGRMVTWriterDataset::GenerateMetadata(
 /************************************************************************/
 /*                            DeleteFeature()                           */
 /************************************************************************/
-OGRErr OGRMVTWriterDataset::DeleteFeature(OGRMVTWriterLayer *poLayer, 
+OGRErr OGRMVTWriterDataset::DeleteFeature(OGRMVTWriterLayer *poLayer,
                                           GIntBig nSerial)
 {
     std::cout << "OGRMVTWriterDataset::DeleteFeature" << std::endl;
@@ -6475,36 +6590,45 @@ OGRErr OGRMVTWriterDataset::DeleteFeature(OGRMVTWriterLayer *poLayer,
     }
 
     // Identify tiles that contain this feature
-    std::set<std::tuple<int, int, int>> tilesForFeature = FetchFeatureTiles(poLayer, nSerial);
+    std::set<std::tuple<int, int, int>> tilesForFeature =
+        FetchFeatureTiles(poLayer, nSerial);
     if (tilesForFeature.empty())
     {
-        std::cout << "No tiles found containing the feature with FID " << nSerial << std::endl;
+        std::cout << "No tiles found containing the feature with FID "
+                  << nSerial << std::endl;
         return OGRERR_NONE;
     }
 
     // Delete the feature from the temporary database
     if (DeleteFeatureByLayer(poLayer, nSerial) != OGRERR_NONE)
     {
-        CPLError(CE_Failure, CPLE_AppDefined, 
-                 "Failed to delete feature with FID %llu from temporary database.", nSerial);
+        CPLError(
+            CE_Failure, CPLE_AppDefined,
+            "Failed to delete feature with FID %llu from temporary database.",
+            nSerial);
         return OGRERR_FAILURE;
     }
 
     // Record tiles that were modified by feature delete
-    for (const auto& [nZ, nX, nY] : tilesForFeature) {
-        std::cout << "Affected Tile: Z=" << nZ << ", X=" << nX << ", Y=" << nY << std::endl;
+    for (const auto &[nZ, nX, nY] : tilesForFeature)
+    {
+        std::cout << "Affected Tile: Z=" << nZ << ", X=" << nX << ", Y=" << nY
+                  << std::endl;
         m_tilesForUpdate.insert(std::make_tuple(nZ, nX, nY));
     }
 
     // Update number of features in layer
-    auto& nCount = m_oMapLayerNameToFeatureCount[poLayer->m_osTargetName];
+    auto &nCount = m_oMapLayerNameToFeatureCount[poLayer->m_osTargetName];
     if (nCount > 0)
     {
         nCount--;
-    } else {
+    }
+    else
+    {
         CPLError(CE_Warning, CPLE_AppDefined,
-                "Warning: Attempting to decrease feature count below zero for layer %s. Resetting count to 0.",
-                poLayer->m_osTargetName.c_str());
+                 "Warning: Attempting to decrease feature count below zero for "
+                 "layer %s. Resetting count to 0.",
+                 poLayer->m_osTargetName.c_str());
 
         nCount = 0;
     }
@@ -6560,10 +6684,12 @@ OGRErr OGRMVTWriterDataset::WriteFeature(OGRMVTWriterLayer *poLayer,
         poFeatureContent->nFID = poFeature->GetFID();
 
         const OGRFeatureDefn *poFDefn = poFeature->GetDefnRef();
-        std::cout << "=============================================" << std::endl;
+        std::cout << "============================================="
+                  << std::endl;
         for (int i = 0; i < poFeature->GetFieldCount(); i++)
         {
-            std::cout << "=============================================" << std::endl;
+            std::cout << "============================================="
+                      << std::endl;
             std::cout << "Zpracovani popisnych atributu" << std::endl;
             std::cout << i << std::endl;
             if (poFeature->IsFieldSetAndNotNull(i))
@@ -6573,7 +6699,7 @@ OGRErr OGRMVTWriterDataset::WriteFeature(OGRMVTWriterLayer *poLayer,
                 OGRFieldType eFieldType = poFieldDefn->GetType();
 
                 std::cout << " - " << poFieldDefn->GetNameRef() << ": ";
-                
+
                 if (eFieldType == OFTInteger || eFieldType == OFTInteger64)
                 {
                     if (poFieldDefn->GetSubType() == OFSTBoolean)
@@ -6614,7 +6740,8 @@ OGRErr OGRMVTWriterDataset::WriteFeature(OGRMVTWriterLayer *poLayer,
                             OGRGetXMLDateTime(poFeature->GetRawFieldRef(i));
                         osFormatted = pszFormatted;
                         CPLFree(pszFormatted);
-                        std::cout << nYear << "-" << nMonth << "-" << nDay << " " << nHour << ":" << nMin << ":" << fSec;
+                        std::cout << nYear << "-" << nMonth << "-" << nDay
+                                  << " " << nHour << ":" << nMin << ":" << fSec;
                     }
                     oValue.setStringValue(osFormatted);
                 }
@@ -6631,8 +6758,8 @@ OGRErr OGRMVTWriterDataset::WriteFeature(OGRMVTWriterLayer *poLayer,
                         poFieldDefn->GetNameRef(), oValue));
             }
         }
-        std::cout << "=============================================" << std::endl;
-
+        std::cout << "============================================="
+                  << std::endl;
 
         for (int nZ = poLayer->m_nMinZoom; nZ <= poLayer->m_nMaxZoom; nZ++)
         {
@@ -6658,10 +6785,12 @@ OGRErr OGRMVTWriterDataset::WriteFeature(OGRMVTWriterLayer *poLayer,
                              INT_MAX, (static_cast<int64_t>(1) << nZ) *
                                               m_nTileMatrixHeight0 -
                                           1)));
-            
+
             std::cout << " " << std::endl;
-            std::cout << "=============== START VYPOCTU ===================" << std::endl;
-            std::cout << "Rozsah zasazenych dlazdic pro zoom: " << nZ << std::endl;
+            std::cout << "=============== START VYPOCTU ==================="
+                      << std::endl;
+            std::cout << "Rozsah zasazenych dlazdic pro zoom: " << nZ
+                      << std::endl;
             std::cout << "nTileMinX: " << nTileMinX << std::endl;
             std::cout << "nTileMaxX: " << nTileMaxX << std::endl;
             std::cout << "nTileMinY: " << nTileMinY << std::endl;
@@ -6671,7 +6800,9 @@ OGRErr OGRMVTWriterDataset::WriteFeature(OGRMVTWriterLayer *poLayer,
             {
                 for (int iY = nTileMinY; iY <= nTileMaxY; iY++)
                 {
-                    std::cout << "Plneni temp table pro dlazdici (Z, X, Y): " << " " << nZ << ", " << iX << ", " << iY << std::endl;
+                    std::cout << "Plneni temp table pro dlazdici (Z, X, Y): "
+                              << " " << nZ << ", " << iX << ", " << iY
+                              << std::endl;
 
                     std::cout << "=== 2D Extent ===" << std::endl;
                     std::cout << "MinX: " << sExtent.MinX << std::endl;
@@ -6688,7 +6819,8 @@ OGRErr OGRMVTWriterDataset::WriteFeature(OGRMVTWriterLayer *poLayer,
                     }
                 }
             }
-            std::cout << "================ KONEC VYPOCTU ===================" << std::endl;
+            std::cout << "================ KONEC VYPOCTU ==================="
+                      << std::endl;
             std::cout << " " << std::endl;
         }
     }
@@ -6881,9 +7013,9 @@ GDALDataset *OGRMVTWriterDataset::Create(const char *pszFilename, int nXSize,
     }
     CPLString osTempDB = CSLFetchNameValueDef(papszOptions, "TEMPORARY_DB",
                                               osTempDBDefault.c_str());
-    
+
     std::cout << osTempDB << std::endl;
-    
+
     if (!bReuseTempFile)
         VSIUnlink(osTempDB);
 
@@ -6944,7 +7076,7 @@ GDALDataset *OGRMVTWriterDataset::Create(const char *pszFilename, int nXSize,
         return nullptr;
     }
     poDS->m_hInsertStmt = hInsertStmt;
-    
+
     poDS->m_nMinZoom = atoi(CSLFetchNameValueDef(
         papszOptions, "MINZOOM", CPLSPrintf("%d", poDS->m_nMinZoom)));
     poDS->m_nMaxZoom = atoi(CSLFetchNameValueDef(
@@ -7128,25 +7260,26 @@ GDALDataset *OGRMVTWriterDatasetCreate(const char *pszFilename, int nXSize,
 /*                          CreateUpdate()                               */
 /************************************************************************/
 
-GDALDataset *OGRMVTWriterDataset::CreateUpdate(GDALOpenInfo* poOpenInfo)
+GDALDataset *OGRMVTWriterDataset::CreateUpdate(GDALOpenInfo *poOpenInfo)
 {
     std::cout << "CreateUpdate" << std::endl;
 
     // Check whether temp db exists or not
-    const char* pszFilename = poOpenInfo->pszFilename;
+    const char *pszFilename = poOpenInfo->pszFilename;
     CPLString osTempDB = CPLString(pszFilename) + ".temp.db";
     VSIStatBufL sStatBuf;
 
     if (VSIStatL(osTempDB.c_str(), &sStatBuf) != 0)
     {
-        CPLError(CE_Failure, CPLE_AppDefined,
-                 "Temporary database %s does not exist. Cannot proceed with update.",
-                 osTempDB.c_str());
+        CPLError(
+            CE_Failure, CPLE_AppDefined,
+            "Temporary database %s does not exist. Cannot proceed with update.",
+            osTempDB.c_str());
         return nullptr;
     }
 
     // Initialize dataset and VFS
-    OGRMVTWriterDataset* poDS = new OGRMVTWriterDataset();
+    OGRMVTWriterDataset *poDS = new OGRMVTWriterDataset();
     poDS->m_bUpdate = true;
     poDS->m_pMyVFS = OGRSQLiteCreateVFS(nullptr, poDS);
     sqlite3_vfs_register(poDS->m_pMyVFS, 0);
@@ -7154,9 +7287,12 @@ GDALDataset *OGRMVTWriterDataset::CreateUpdate(GDALOpenInfo* poOpenInfo)
     // Open connection to temp db
     sqlite3 *hDB = nullptr;
     int nOpenFlags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_NOMUTEX;
-    if (sqlite3_open_v2(osTempDB, &hDB, nOpenFlags, poDS->m_pMyVFS->zName) != SQLITE_OK || hDB == nullptr)
+    if (sqlite3_open_v2(osTempDB, &hDB, nOpenFlags, poDS->m_pMyVFS->zName) !=
+            SQLITE_OK ||
+        hDB == nullptr)
     {
-        CPLError(CE_Failure, CPLE_FileIO, "Cannot open existing database: %s", osTempDB.c_str());
+        CPLError(CE_Failure, CPLE_FileIO, "Cannot open existing database: %s",
+                 osTempDB.c_str());
         if (hDB)
             sqlite3_close(hDB);
         return nullptr;
@@ -7167,8 +7303,9 @@ GDALDataset *OGRMVTWriterDataset::CreateUpdate(GDALOpenInfo* poOpenInfo)
     poDS->m_hDB = hDB;
 
     // Prepare SQL statements
-    poDS->m_nTempTiles = SQLGetInteger64(hDB, "SELECT COUNT(*) FROM temp", nullptr);
-            
+    poDS->m_nTempTiles =
+        SQLGetInteger64(hDB, "SELECT COUNT(*) FROM temp", nullptr);
+
     sqlite3_stmt *hInsertStmt = nullptr;
     CPL_IGNORE_RET_VAL(sqlite3_prepare_v2(
         hDB,
@@ -7201,8 +7338,9 @@ GDALDataset *OGRMVTWriterDataset::CreateUpdate(GDALOpenInfo* poOpenInfo)
     // Temporary db cannot be removed upon update operation
     CPLSetConfigOption("OGR_MVT_REMOVE_TEMP_FILE", "NO");
 
-    // Load configuration from metadata.json 
-    CPLString osMetadataFile = CPLFormFilenameSafe(CPLString(pszFilename), "metadata.json", nullptr);
+    // Load configuration from metadata.json
+    CPLString osMetadataFile =
+        CPLFormFilenameSafe(CPLString(pszFilename), "metadata.json", nullptr);
     if (!poDS->m_oConf.Load(osMetadataFile))
     {
         CPLError(CE_Failure, CPLE_AppDefined, "Cannot parse metadata.json");
@@ -7211,9 +7349,10 @@ GDALDataset *OGRMVTWriterDataset::CreateUpdate(GDALOpenInfo* poOpenInfo)
     }
 
     // Store configuration to class variables
-    const CPLJSONObject& oRoot = poDS->m_oConf.GetRoot();
+    const CPLJSONObject &oRoot = poDS->m_oConf.GetRoot();
     poDS->m_osName = oRoot.GetString("name", poDS->m_osName);
-    poDS->m_osDescription = oRoot.GetString("description", poDS->m_osDescription);
+    poDS->m_osDescription =
+        oRoot.GetString("description", poDS->m_osDescription);
     poDS->m_nMVTVersion = oRoot.GetInteger("version", poDS->m_nMVTVersion);
     poDS->m_nMinZoom = oRoot.GetInteger("minzoom", poDS->m_nMinZoom);
     poDS->m_nMaxZoom = oRoot.GetInteger("maxzoom", poDS->m_nMaxZoom);
@@ -7221,9 +7360,12 @@ GDALDataset *OGRMVTWriterDataset::CreateUpdate(GDALOpenInfo* poOpenInfo)
     poDS->m_osBounds = oRoot.GetString("bounds", poDS->m_osBounds);
     poDS->m_osCenter = oRoot.GetString("center", poDS->m_osCenter);
     poDS->m_osExtension = oRoot.GetString("format", poDS->m_osExtension);
-    poDS->m_dfTopX = oRoot.GetDouble("tile_origin_upper_left_x", poDS->m_dfTopX);
-    poDS->m_dfTopY = oRoot.GetDouble("tile_origin_upper_left_y", poDS->m_dfTopY);
-    poDS->m_dfTileDim0 = oRoot.GetDouble("tile_dimension_zoom_0", poDS->m_dfTileDim0);
+    poDS->m_dfTopX =
+        oRoot.GetDouble("tile_origin_upper_left_x", poDS->m_dfTopX);
+    poDS->m_dfTopY =
+        oRoot.GetDouble("tile_origin_upper_left_y", poDS->m_dfTopY);
+    poDS->m_dfTileDim0 =
+        oRoot.GetDouble("tile_dimension_zoom_0", poDS->m_dfTileDim0);
 
     // Create CRS and store to class variables
     const CPLString osCRS = oRoot.GetString("crs");
@@ -7232,7 +7374,8 @@ GDALDataset *OGRMVTWriterDataset::CreateUpdate(GDALOpenInfo* poOpenInfo)
         poDS->m_poSRS = new OGRSpatialReference();
         if (poDS->m_poSRS->SetFromUserInput(osCRS) != OGRERR_NONE)
         {
-            CPLError(CE_Warning, CPLE_AppDefined, "Failed to parse CRS: %s", osCRS.c_str());
+            CPLError(CE_Warning, CPLE_AppDefined, "Failed to parse CRS: %s",
+                     osCRS.c_str());
             delete poDS->m_poSRS;
             poDS->m_poSRS = nullptr;
         }
@@ -7255,19 +7398,19 @@ GDALDataset *OGRMVTWriterDataset::CreateUpdate(GDALOpenInfo* poOpenInfo)
     // Recreate layers from temp db
     sqlite3_stmt *hStmt = nullptr;
     CPL_IGNORE_RET_VAL(sqlite3_prepare_v2(
-        hDB,
-        "SELECT distinct layer FROM temp",
-        -1, &hStmt, nullptr));
+        hDB, "SELECT distinct layer FROM temp", -1, &hStmt, nullptr));
     if (hStmt == nullptr)
     {
-        CPLError(CE_Failure, CPLE_AppDefined, "Failed to prepare SQL to read layers from temp.");
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Failed to prepare SQL to read layers from temp.");
         delete poDS;
         return nullptr;
     }
 
     while (sqlite3_step(hStmt) == SQLITE_ROW)
     {
-        const char *pszLayerName = reinterpret_cast<const char *>(sqlite3_column_text(hStmt, 0));
+        const char *pszLayerName =
+            reinterpret_cast<const char *>(sqlite3_column_text(hStmt, 0));
 
         if (pszLayerName)
         {
@@ -7303,14 +7446,13 @@ GDALDataset *OGRMVTWriterDataset::CreateUpdate(GDALOpenInfo* poOpenInfo)
 
             OGRGeomFieldDefn oGeomFieldDefn("geometry", wkbUnknown);
 
-            OGRLayer *poLayer = poDS->CreateLayer(
-                pszLayerName,
-                &oGeomFieldDefn,
-                papszOptions);
-            
+            OGRLayer *poLayer =
+                poDS->CreateLayer(pszLayerName, &oGeomFieldDefn, papszOptions);
+
             if (!poLayer)
             {
-                CPLError(CE_Warning, CPLE_AppDefined, "Failed to create layer: %s", pszLayerName);
+                CPLError(CE_Warning, CPLE_AppDefined,
+                         "Failed to create layer: %s", pszLayerName);
                 delete poDS;
                 return nullptr;
             }
@@ -7319,23 +7461,24 @@ GDALDataset *OGRMVTWriterDataset::CreateUpdate(GDALOpenInfo* poOpenInfo)
     sqlite3_finalize(hStmt);
 
     std::cout << "-----------------------------" << std::endl;
-    std::cout << "Final list of created layers (" << poDS->m_apoLayers.size() << "):" << std::endl;
-    for (const auto& poLayerPtr : poDS->m_apoLayers)
+    std::cout << "Final list of created layers (" << poDS->m_apoLayers.size()
+              << "):" << std::endl;
+    for (const auto &poLayerPtr : poDS->m_apoLayers)
     {
         if (poLayerPtr)
         {
-            std::cout << "  - " << poLayerPtr->GetName() 
-                    << " (minzoom: " << poLayerPtr->m_nMinZoom 
-                    << ", maxzoom: " << poLayerPtr->m_nMaxZoom 
-                    << ", target_name: " << poLayerPtr->m_osTargetName 
-                    << ")" << std::endl;
+            std::cout << "  - " << poLayerPtr->GetName()
+                      << " (minzoom: " << poLayerPtr->m_nMinZoom
+                      << ", maxzoom: " << poLayerPtr->m_nMaxZoom
+                      << ", target_name: " << poLayerPtr->m_osTargetName << ")"
+                      << std::endl;
         }
     }
     std::cout << "-----------------------------" << std::endl;
 
     std::cout << "Layer creation complete." << std::endl;
 
-    // Configures the thread pool for the dataset based on the number of available CPUs or 
+    // Configures the thread pool for the dataset based on the number of available CPUs or
     // the value specified in the `GDAL_NUM_THREADS` environment variable
     int nThreads = CPLGetNumCPUs();
     const char *pszNumThreads = CPLGetConfigOption("GDAL_NUM_THREADS", nullptr);
@@ -7345,20 +7488,24 @@ GDALDataset *OGRMVTWriterDataset::CreateUpdate(GDALOpenInfo* poOpenInfo)
 
     if (pszNumThreads)
     {
-        std::cout << "GDAL_NUM_THREADS environment variable: " << pszNumThreads << std::endl;
+        std::cout << "GDAL_NUM_THREADS environment variable: " << pszNumThreads
+                  << std::endl;
         if (CPLGetValueType(pszNumThreads) == CPL_VALUE_INTEGER)
         {
             nThreads = atoi(pszNumThreads);
-            std::cout << "Using overridden thread count from GDAL_NUM_THREADS: " << nThreads << std::endl;
+            std::cout << "Using overridden thread count from GDAL_NUM_THREADS: "
+                      << nThreads << std::endl;
         }
         else
         {
-            std::cout << "Warning: GDAL_NUM_THREADS is set but not an integer, ignoring.\n";
+            std::cout << "Warning: GDAL_NUM_THREADS is set but not an integer, "
+                         "ignoring.\n";
         }
     }
     else
     {
-        std::cout << "GDAL_NUM_THREADS not set, using CPU count: " << nThreads << std::endl;
+        std::cout << "GDAL_NUM_THREADS not set, using CPU count: " << nThreads
+                  << std::endl;
     }
 
     // Volitelně: výpis po nastavení ThreadPoolu
@@ -7368,7 +7515,8 @@ GDALDataset *OGRMVTWriterDataset::CreateUpdate(GDALOpenInfo* poOpenInfo)
         poDS->m_bThreadPoolOK = ok;
 
         if (ok)
-            std::cout << "Thread pool successfully initialized with " << nThreads << " threads.\n";
+            std::cout << "Thread pool successfully initialized with "
+                      << nThreads << " threads.\n";
         else
             std::cout << "Thread pool initialization failed.\n";
     }
@@ -7378,22 +7526,27 @@ GDALDataset *OGRMVTWriterDataset::CreateUpdate(GDALOpenInfo* poOpenInfo)
     }
     std::cout << "=====================" << std::endl;
 
+    const char *sqlQuery =
+        CPLSPrintf("SELECT MAX(idx) FROM temp WHERE layer = '%s'",
+                   poDS->GetLayer(0)->GetName());
 
-    const char* sqlQuery = CPLSPrintf(
-        "SELECT MAX(idx) FROM temp WHERE layer = '%s'",
-        poDS->GetLayer(0)->GetName());
-
-    std::cout << "Max idx: " << SQLGetInteger64(hDB, sqlQuery, nullptr) << std::endl;
+    std::cout << "Max idx: " << SQLGetInteger64(hDB, sqlQuery, nullptr)
+              << std::endl;
 
     poDS->SetDescription(pszFilename);
     poDS->poDriver = GDALDriver::FromHandle(GDALGetDriverByName("MVT"));
 
-    if (poDS->m_apoLayers.empty()) {
+    if (poDS->m_apoLayers.empty())
+    {
         std::cerr << "No layers found in the dataset." << std::endl;
-    } else {
-        std::cout << "Found " << poDS->m_apoLayers.size() << " layers." << std::endl;
-}
-    std::cout << "Dataset type (CreateUpdate): " << typeid(*poDS).name() << std::endl;
+    }
+    else
+    {
+        std::cout << "Found " << poDS->m_apoLayers.size() << " layers."
+                  << std::endl;
+    }
+    std::cout << "Dataset type (CreateUpdate): " << typeid(*poDS).name()
+              << std::endl;
 
     return poDS;
 }
@@ -7510,7 +7663,8 @@ void RegisterOGRMVT()
         "</CreationOptionList>");
     std::cout << *poDriver->GetMetadata() << std::endl;
     std::cout << *poDriver->GetMetadataDomainList() << std::endl;
-    std::cout << poDriver->GetMetadataItem(GDAL_DMD_SUPPORTED_SQL_DIALECTS) << std::endl;
+    std::cout << poDriver->GetMetadataItem(GDAL_DMD_SUPPORTED_SQL_DIALECTS)
+              << std::endl;
     std::cout << (poDriver->GetMetadata()[1]) << std::endl;
 
 #endif  // HAVE_MVT_WRITE_SUPPORT

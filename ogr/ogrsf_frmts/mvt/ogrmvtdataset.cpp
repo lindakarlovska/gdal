@@ -221,6 +221,7 @@ class OGRMVTDirectoryLayer final : public OGRMVTLayerBase
     OGRMVTDataset *m_poDS;
     int m_nZ = 0;
     bool m_bUseReadDir = true;
+    bool m_bAddTileFields = false;
     CPLString m_osDirName;
     CPLStringList m_aosDirContent;
     CPLString m_aosSubDirName;
@@ -228,6 +229,8 @@ class OGRMVTDirectoryLayer final : public OGRMVTLayerBase
     bool m_bEOF = false;
     int m_nXIndex = 0;
     int m_nYIndex = 0;
+    int m_nTileX = -1;
+    int m_nTileY = -1;
     GDALDataset *m_poCurrentTile = nullptr;
     bool m_bJsonField = false;
     GIntBig m_nFIDBase = 0;
@@ -255,6 +258,7 @@ class OGRMVTDirectoryLayer final : public OGRMVTLayerBase
     virtual void ResetReading() override;
 
     virtual GIntBig GetFeatureCount(int bForce) override;
+
     OGRErr IGetExtent(int iGeomField, OGREnvelope *psExtent,
                       bool bForce) override;
 
@@ -1465,12 +1469,28 @@ OGRMVTDirectoryLayer::OGRMVTDirectoryLayer(
     bool bJsonField, OGRwkbGeometryType eGeomType, const OGREnvelope *psExtent)
     : m_poDS(poDS), m_osDirName(pszDirectoryName), m_bJsonField(bJsonField)
 {
+    std::cout << "OGRMVTDirectoryLayer constructor called" << std::endl;
+
     m_poFeatureDefn = new OGRFeatureDefn(pszLayerName);
     SetDescription(m_poFeatureDefn->GetName());
     m_poFeatureDefn->SetGeomType(eGeomType);
     m_poFeatureDefn->Reference();
 
     m_poFeatureDefn->GetGeomFieldDefn(0)->SetSpatialRef(poDS->GetSRS());
+
+    m_bAddTileFields =
+    CPLTestBool(CPLGetConfigOption("OGR_MVT_ADD_TILE_FIELDS", "NO"));
+
+    if (m_bAddTileFields)
+    {
+        OGRFieldDefn oFieldTileZ("tile_z", OFTInteger);
+        OGRFieldDefn oFieldTileX("tile_x", OFTInteger);
+        OGRFieldDefn oFieldTileY("tile_y", OFTInteger);
+
+        m_poFeatureDefn->AddFieldDefn(&oFieldTileZ);
+        m_poFeatureDefn->AddFieldDefn(&oFieldTileX);
+        m_poFeatureDefn->AddFieldDefn(&oFieldTileY);
+    }
 
     if (m_bJsonField)
     {
@@ -1633,6 +1653,7 @@ void OGRMVTDirectoryLayer::ReadNewSubDir()
 
 void OGRMVTDirectoryLayer::OpenTile()
 {
+    std::cout << "OpenTile" << std::endl;
     delete m_poCurrentTile;
     m_poCurrentTile = nullptr;
     if (m_nYIndex < (m_bUseReadDir ? m_aosSubDirContent.Count() : (1 << m_nZ)))
@@ -1653,12 +1674,12 @@ void OGRMVTDirectoryLayer::OpenTile()
             OGRMVTDataset::Open(&oOpenInfo, /* bRecurseAllowed = */ false);
         CSLDestroy(oOpenInfo.papszOpenOptions);
 
-        int nX = (m_bUseReadDir || !m_aosDirContent.empty())
+        m_nTileX = (m_bUseReadDir || !m_aosDirContent.empty())
                      ? atoi(m_aosDirContent[m_nXIndex])
                      : m_nXIndex;
-        int nY =
+        m_nTileY =
             m_bUseReadDir ? atoi(m_aosSubDirContent[m_nYIndex]) : m_nYIndex;
-        m_nFIDBase = (static_cast<GIntBig>(nX) << m_nZ) | nY;
+        m_nFIDBase = (static_cast<GIntBig>(m_nTileX) << m_nZ) | m_nTileY;
     }
 }
 
@@ -1861,6 +1882,13 @@ OGRFeature *OGRMVTDirectoryLayer::GetNextRawFeature()
             OGRFeature *poFeature = CreateFeatureFrom(poUnderlyingFeature);
             poFeature->SetFID(m_nFIDBase +
                               (poUnderlyingFeature->GetFID() << (2 * m_nZ)));
+            
+            if (m_bAddTileFields)
+            {
+                poFeature->SetField("tile_z", m_nZ);
+                poFeature->SetField("tile_x", m_nTileX);
+                poFeature->SetField("tile_y", m_nTileY);
+            }
             delete poUnderlyingFeature;
             return poFeature;
         }
@@ -1969,47 +1997,6 @@ OGRLayer *OGRMVTDataset::GetLayer(int iLayer)
 static int OGRMVTDriverIdentify(GDALOpenInfo *poOpenInfo)
 
 {
-    std::cout << "Identify" << std::endl;
-
-    if (poOpenInfo->pszFilename)
-        std::cout << "  Filename: " << poOpenInfo->pszFilename << std::endl;
-    else
-        std::cout << "  Filename: (null)" << std::endl;
-
-    std::cout << "  Access mode: "
-              << (poOpenInfo->eAccess == GA_Update ? "UPDATE" : "READ-ONLY")
-              << std::endl;
-
-    std::cout << "  Open flags: ";
-    if (poOpenInfo->nOpenFlags & GDAL_OF_VECTOR)
-        std::cout << "[VECTOR] ";
-    if (poOpenInfo->nOpenFlags & GDAL_OF_RASTER)
-        std::cout << "[RASTER] ";
-    if (poOpenInfo->nOpenFlags & GDAL_OF_UPDATE)
-        std::cout << "[UPDATE] ";
-    if (poOpenInfo->nOpenFlags & GDAL_OF_INTERNAL)
-        std::cout << "[INTERNAL] ";
-    std::cout << std::endl;
-
-    // Možnosti, pokud jsou
-    if (poOpenInfo->papszOpenOptions)
-    {
-        std::cout << "  Open options:" << std::endl;
-        for (int i = 0; poOpenInfo->papszOpenOptions[i] != nullptr; i++)
-        {
-            std::cout << "    - " << poOpenInfo->papszOpenOptions[i]
-                      << std::endl;
-        }
-    }
-    else
-    {
-        std::cout << "  Open options: (none)" << std::endl;
-    }
-
-    std::cout << "  Directory: " << (poOpenInfo->bIsDirectory ? "YES" : "NO")
-              << std::endl;
-    std::cout << "====================================" << std::endl;
-
     if (STARTS_WITH_CI(poOpenInfo->pszFilename, "MVT:"))
     {
         std::cout << "true 1" << std::endl;
@@ -2035,7 +2022,6 @@ static int OGRMVTDriverIdentify(GDALOpenInfo *poOpenInfo)
 
         if (!bBaseNameIsInteger)
         {
-            std::cout << "Directory is not integer" << std::endl;
             const CPLStringList aosDirContent = StripDummyEntries(
                 CPLStringList(VSIReadDirEx(poOpenInfo->pszFilename, 10)));
 
@@ -2051,7 +2037,6 @@ static int OGRMVTDriverIdentify(GDALOpenInfo *poOpenInfo)
 
         if (bBaseNameIsInteger)
         {
-            std::cout << "Detected integer directory" << std::endl;
             VSIStatBufL sStat;
             CPLString osMetadataFile(CPLFormFilenameSafe(
                 CPLGetPathSafe(poOpenInfo->pszFilename).c_str(),
@@ -2540,10 +2525,6 @@ static int OGRMVTDriverIdentify(GDALOpenInfo *poOpenInfo)
     {
     }
 
-    std::cout << "bLayerNameFound: " << bLayerNameFound << std::endl;
-    std::cout << "bKeyFound: " << bKeyFound << std::endl;
-    std::cout << "bFeatureFound: " << bFeatureFound << std::endl;
-    std::cout << "bVersionFound: " << bVersionFound << std::endl;
     return bLayerNameFound && (bKeyFound || bFeatureFound || bVersionFound);
 }
 
@@ -2710,8 +2691,6 @@ GDALDataset *OGRMVTDataset::OpenDirectory(GDALOpenInfo *poOpenInfo)
     }
 
     const CPLString osZ(CPLGetFilename(poOpenInfo->pszFilename));
-    if (CPLGetValueType(osZ) != CPL_VALUE_INTEGER)
-        return nullptr;
 
     const int nZ = atoi(osZ);
     if (nZ < 0 || nZ > 30)
@@ -2895,6 +2874,7 @@ GDALDataset *OGRMVTDataset::OpenDirectory(GDALOpenInfo *poOpenInfo)
                         OGRFeatureDefn *poLDefn;
                         if (poLayer == nullptr)
                         {
+                            std::cout << "OpenDirectory OGRMVTDirectoryLayer" << std::endl;
                             CPLJSONObject oFields;
                             oFields.Deinit();
                             poDS->m_apoLayers.push_back(
@@ -3062,8 +3042,6 @@ GDALDataset *OGRMVTDataset::Open(GDALOpenInfo *poOpenInfo)
 
 GDALDataset *OGRMVTDataset::Open(GDALOpenInfo *poOpenInfo, bool bRecurseAllowed)
 {
-    std::cout << "OGRMVTDataset::Open" << std::endl;
-
     if (!OGRMVTDriverIdentify(poOpenInfo))
     {
         std::cout << "return nullptr" << std::endl;
@@ -3072,22 +3050,6 @@ GDALDataset *OGRMVTDataset::Open(GDALOpenInfo *poOpenInfo, bool bRecurseAllowed)
 
     VSILFILE *fp = poOpenInfo->fpL;
     CPLString osFilename(poOpenInfo->pszFilename);
-
-    if (bRecurseAllowed)
-        std::cout << "Rekurze povolena \n";
-    else
-        std::cout << "Rekurze zakázána \n";
-
-    if (!STARTS_WITH(osFilename, "/vsigzip/"))
-        std::cout << "Není vsigzip \n";
-    else
-        std::cout << "Je vsigzip \n";
-
-    const char *filenameOnly = CPLGetFilename(osFilename);
-    if (strchr(filenameOnly, '.') == nullptr)
-        std::cout << "Bez přípony \n";
-    else
-        std::cout << "Má příponu \n";
 
     if (STARTS_WITH_CI(poOpenInfo->pszFilename, "MVT:"))
     {
@@ -3103,17 +3065,10 @@ GDALDataset *OGRMVTDataset::Open(GDALOpenInfo *poOpenInfo, bool bRecurseAllowed)
         // we open a directory
         VSIStatBufL sStat;
 
-        if (VSIStatL(osFilename, &sStat) == 0)
-            std::cout << "Stat OK \n";
-        else
-            std::cout << "Stat FAIL \n";
-
         if (bRecurseAllowed && !STARTS_WITH(osFilename, "/vsigzip/") &&
             strchr((CPLGetFilename(osFilename)), '.') == nullptr &&
             VSIStatL(osFilename, &sStat) == 0 && VSI_ISDIR(sStat.st_mode))
         {
-            std::cout << "filename has no extension and is a directory"
-                      << std::endl;
             GDALOpenInfo oOpenInfo(osFilename, GA_ReadOnly);
             oOpenInfo.papszOpenOptions = poOpenInfo->papszOpenOptions;
             GDALDataset *poDS = OpenDirectory(&oOpenInfo);
@@ -3130,9 +3085,6 @@ GDALDataset *OGRMVTDataset::Open(GDALOpenInfo *poOpenInfo, bool bRecurseAllowed)
              STARTS_WITH(osFilename, "https://")) &&
             CPLGetValueType(CPLGetFilename(osFilename)) == CPL_VALUE_INTEGER)
         {
-            std::cout
-                << "if the filename is an integer, consider it is a directory"
-                << std::endl;
             GDALOpenInfo oOpenInfo(osFilename, GA_ReadOnly);
             oOpenInfo.papszOpenOptions = poOpenInfo->papszOpenOptions;
             GDALDataset *poDS = OpenDirectory(&oOpenInfo);
@@ -3168,7 +3120,6 @@ GDALDataset *OGRMVTDataset::Open(GDALOpenInfo *poOpenInfo, bool bRecurseAllowed)
                CPLGetValueType(CPLGetFilename(poOpenInfo->pszFilename)) ==
                    CPL_VALUE_INTEGER)))
     {
-        std::cout << "return OpenDirectory(poOpenInfo)" << std::endl;
         return OpenDirectory(poOpenInfo);
     }
     // Is it a gzipped file ?
@@ -3614,7 +3565,7 @@ class OGRMVTWriterDataset final : public GDALDataset
     FetchFeatureTiles(OGRMVTWriterLayer *poLayer, GIntBig nFID);
     sqlite3_stmt *PrepareInsertFeature();
     sqlite3_stmt *PrepareDeleteByLayer();
-    OGRErr DeleteFeatureByLayer(OGRMVTWriterLayer *poLayer, GIntBig nFID);
+    OGRErr DeleteFeatureByLayer(OGRMVTWriterLayer *poLayer, GIntBig featureId);
 
     bool UpdateTile(const std::string &oTileBuffer, int nZ, int nX, int nY);
 

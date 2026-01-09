@@ -1479,7 +1479,7 @@ OGRMVTDirectoryLayer::OGRMVTDirectoryLayer(
     m_poFeatureDefn->GetGeomFieldDefn(0)->SetSpatialRef(poDS->GetSRS());
 
     m_bAddTileFields =
-    CPLTestBool(CPLGetConfigOption("OGR_MVT_ADD_TILE_FIELDS", "NO"));
+        CPLTestBool(CPLGetConfigOption("OGR_MVT_ADD_TILE_FIELDS", "NO"));
 
     if (m_bAddTileFields)
     {
@@ -1675,8 +1675,8 @@ void OGRMVTDirectoryLayer::OpenTile()
         CSLDestroy(oOpenInfo.papszOpenOptions);
 
         m_nTileX = (m_bUseReadDir || !m_aosDirContent.empty())
-                     ? atoi(m_aosDirContent[m_nXIndex])
-                     : m_nXIndex;
+                       ? atoi(m_aosDirContent[m_nXIndex])
+                       : m_nXIndex;
         m_nTileY =
             m_bUseReadDir ? atoi(m_aosSubDirContent[m_nYIndex]) : m_nYIndex;
         m_nFIDBase = (static_cast<GIntBig>(m_nTileX) << m_nZ) | m_nTileY;
@@ -1882,7 +1882,7 @@ OGRFeature *OGRMVTDirectoryLayer::GetNextRawFeature()
             OGRFeature *poFeature = CreateFeatureFrom(poUnderlyingFeature);
             poFeature->SetFID(m_nFIDBase +
                               (poUnderlyingFeature->GetFID() << (2 * m_nZ)));
-            
+
             if (m_bAddTileFields)
             {
                 poFeature->SetField("tile_z", m_nZ);
@@ -2874,7 +2874,8 @@ GDALDataset *OGRMVTDataset::OpenDirectory(GDALOpenInfo *poOpenInfo)
                         OGRFeatureDefn *poLDefn;
                         if (poLayer == nullptr)
                         {
-                            std::cout << "OpenDirectory OGRMVTDirectoryLayer" << std::endl;
+                            std::cout << "OpenDirectory OGRMVTDirectoryLayer"
+                                      << std::endl;
                             CPLJSONObject oFields;
                             oFields.Deinit();
                             poDS->m_apoLayers.push_back(
@@ -3468,6 +3469,7 @@ class OGRMVTWriterDataset final : public GDALDataset
     sqlite3_vfs *m_pMyVFS = nullptr;
     sqlite3 *m_hDB = nullptr;
     sqlite3_stmt *m_hInsertStmt = nullptr;
+    sqlite3_stmt *m_hConfigInsertStmt = nullptr;
     sqlite3_stmt *m_hSelectTilesStmt = nullptr;
     sqlite3_stmt *m_hDeleteByLayerStmt = nullptr;
     int m_nMinZoom = 0;
@@ -3507,7 +3509,10 @@ class OGRMVTWriterDataset final : public GDALDataset
     int m_nTileMatrixHeight0 =
         1;  // Number of tiles along Y axis at zoom level 0
     bool m_bReuseTempFile = false;  // debug only
-    bool m_bUpdate = false;         // if opened in GDAL_OF_UPDATE mode
+    bool m_bRemoveTempFile = true;
+    bool m_bPrepareForUpdate = false;
+    CPLString m_osOgrFidColumn;
+    bool m_bUpdate = false;  // if opened in GDAL_OF_UPDATE mode
 
     OGRErr PreGenerateForTile(
         int nZ, int nX, int nY, const CPLString &osTargetName,
@@ -6923,6 +6928,8 @@ GDALDataset *OGRMVTWriterDataset::Create(const char *pszFilename, int nXSize,
     // For debug only
     bool bReuseTempFile =
         CPLTestBool(CPLGetConfigOption("OGR_MVT_REUSE_TEMP_FILE", "NO"));
+    bool bRemoveTempFile =
+        CPLTestBool(CPLGetConfigOption("OGR_MVT_REMOVE_TEMP_FILE", "YES"));
 
     if (bMBTILES)
     {
@@ -6965,12 +6972,34 @@ GDALDataset *OGRMVTWriterDataset::Create(const char *pszFilename, int nXSize,
     CPLString osTempDB = CSLFetchNameValueDef(papszOptions, "TEMPORARY_DB",
                                               osTempDBDefault.c_str());
 
+    bool bPrepareForUpdate = CPLTestBool(
+        CSLFetchNameValueDef(papszOptions, "PREPARE_FOR_UPDATE", "NO"));
+    CPLString osOgrFidColumn =
+        CSLFetchNameValueDef(papszOptions, "OGR_FID", "");
+    if (!osOgrFidColumn.empty() && bPrepareForUpdate)
+    {
+        CPLError(
+            CE_Failure, CPLE_AppDefined,
+            "OGR_FID option is only valid with PREPARE_FOR_UPDATE set to YES");
+        delete poDS;
+        return nullptr;
+    }
+
+    if (bPrepareForUpdate)
+    {
+        bReuseTempFile = false;
+        bRemoveTempFile = false;
+    }
+
     std::cout << osTempDB << std::endl;
 
     if (!bReuseTempFile)
         VSIUnlink(osTempDB);
 
     sqlite3 *hDB = nullptr;
+    sqlite3_stmt *hInsertStmt = nullptr;
+    sqlite3_stmt *hConfigInsertStmt = nullptr;
+
     if (sqlite3_open_v2(osTempDB, &hDB,
                         SQLITE_OPEN_READWRITE |
                             (bReuseTempFile ? 0 : SQLITE_OPEN_CREATE) |
@@ -6986,10 +7015,12 @@ GDALDataset *OGRMVTWriterDataset::Create(const char *pszFilename, int nXSize,
     poDS->m_osTempDB = osTempDB;
     poDS->m_hDB = hDB;
     poDS->m_bReuseTempFile = bReuseTempFile;
+    poDS->m_bRemoveTempFile = bRemoveTempFile;
+    poDS->m_bPrepareForUpdate = bPrepareForUpdate;
+    poDS->m_osOgrFidColumn = osOgrFidColumn;
 
     // For Unix
-    if (!poDS->m_bReuseTempFile &&
-        CPLTestBool(CPLGetConfigOption("OGR_MVT_REMOVE_TEMP_FILE", "YES")))
+    if (!poDS->m_bReuseTempFile && poDS->m_bRemoveTempFile)
     {
         VSIUnlink(osTempDB);
     }
@@ -7001,32 +7032,77 @@ GDALDataset *OGRMVTWriterDataset::Create(const char *pszFilename, int nXSize,
     }
     else
     {
-        CPL_IGNORE_RET_VAL(SQLCommand(
-            hDB,
-            "PRAGMA page_size = 4096;"  // 4096: default since sqlite 3.12
-            "PRAGMA synchronous = OFF;"
-            "PRAGMA journal_mode = OFF;"
-            "PRAGMA temp_store = MEMORY;"
-            "CREATE TABLE temp(z INTEGER, x INTEGER, y INTEGER, layer TEXT, "
-            "idx INTEGER, feature BLOB, geomtype INTEGER, area_or_length "
-            "DOUBLE);"
-            "CREATE INDEX temp_index ON temp (z, x, y, layer, idx);"));
+        if (poDS->m_osOgrFidColumn.empty())
+        {
+            CPL_IGNORE_RET_VAL(SQLCommand(
+                hDB,
+                "PRAGMA page_size = 4096;"  // 4096: default since sqlite 3.12
+                "PRAGMA synchronous = OFF;"
+                "PRAGMA journal_mode = OFF;"
+                "PRAGMA temp_store = MEMORY;"
+                "CREATE TABLE temp(z INTEGER, x INTEGER, y INTEGER, layer "
+                "TEXT, "
+                "idx INTEGER, feature BLOB, geomtype INTEGER, "
+                "area_or_length "
+                "DOUBLE);"
+                "CREATE INDEX temp_index ON temp (z, x, y, layer, idx);"));
+        }
+        else
+        {
+            CPL_IGNORE_RET_VAL(
+                SQLCommand(hDB, "PRAGMA page_size = 4096;"
+                                "PRAGMA synchronous = OFF;"
+                                "PRAGMA journal_mode = OFF;"
+                                "PRAGMA temp_store = MEMORY;"
+                                "CREATE TABLE temp(z INTEGER, x INTEGER, y "
+                                "INTEGER, layer TEXT, "
+                                "idx INTEGER, ogr_fid INTEGER, feature BLOB, "
+                                "geomtype INTEGER, area_or_length "
+                                "DOUBLE);"
+                                "CREATE INDEX temp_index ON temp (z, x, y, "
+                                "layer, idx, ogr_fid);"));
+        }
+
+        if (poDS->m_bPrepareForUpdate)
+        {
+            CPL_IGNORE_RET_VAL(
+                SQLCommand(hDB, "CREATE TABLE configuration(key TEXT PRIMARY "
+                                "KEY, value TEXT NOT NULL);"));
+
+            CPL_IGNORE_RET_VAL(sqlite3_prepare_v2(
+                hDB, "INSERT INTO configuration (key, value) VALUES (?,?)", -1,
+                &hConfigInsertStmt, nullptr));
+        }
     }
 
     std::cout << "Vytvoreni tabulky" << std::endl;
 
-    sqlite3_stmt *hInsertStmt = nullptr;
-    CPL_IGNORE_RET_VAL(sqlite3_prepare_v2(
-        hDB,
-        "INSERT INTO temp (z,x,y,layer,idx,feature,geomtype,area_or_length) "
-        "VALUES (?,?,?,?,?,?,?,?)",
-        -1, &hInsertStmt, nullptr));
+    if (poDS->m_osOgrFidColumn.empty())
+    {
+        CPL_IGNORE_RET_VAL(sqlite3_prepare_v2(
+            hDB,
+            "INSERT INTO temp "
+            "(z,x,y,layer,idx,feature,geomtype,area_or_length) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            -1, &hInsertStmt, nullptr));
+    }
+    else
+    {
+        CPL_IGNORE_RET_VAL(sqlite3_prepare_v2(
+            hDB,
+            "INSERT INTO temp "
+            "(z,x,y,layer,idx,ogr_fid,feature,geomtype,area_or_length) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            -1, &hInsertStmt, nullptr));
+    }
+
     if (hInsertStmt == nullptr)
     {
         delete poDS;
         return nullptr;
     }
     poDS->m_hInsertStmt = hInsertStmt;
+    poDS->m_hConfigInsertStmt = hConfigInsertStmt;
 
     poDS->m_nMinZoom = atoi(CSLFetchNameValueDef(
         papszOptions, "MINZOOM", CPLSPrintf("%d", poDS->m_nMinZoom)));
@@ -7152,6 +7228,59 @@ GDALDataset *OGRMVTWriterDataset::Create(const char *pszFilename, int nXSize,
         }
     }
 
+    if (poDS->m_bPrepareForUpdate)
+    {
+        CPLString osSRS;
+        if (poDS->m_poSRS)
+        {
+            char *pszWKT = nullptr;
+            poDS->m_poSRS->exportToWkt(&pszWKT);
+            osSRS = pszWKT ? pszWKT : "";
+            CPLFree(pszWKT);
+        }
+
+        struct ConfigItem
+        {
+            const char *key;
+            CPLString value;
+        };
+
+        ConfigItem asConfigItems[] = {
+            {"NAME", poDS->m_osName},
+            {"DESCRIPTION", poDS->m_osDescription},
+            {"TYPE", poDS->m_osType},
+            {"COMPRESS", poDS->m_bGZip ? "true" : "false"},
+            {"BOUNDS", poDS->m_osBounds},
+            {"CENTER", poDS->m_osCenter},
+            {"TILE_EXTENSION", poDS->m_osExtension},
+            {"SRS", osSRS},
+            {"TOP_X", CPLSPrintf("%.15g", poDS->m_dfTopX)},
+            {"TOP_Y", CPLSPrintf("%.15g", poDS->m_dfTopY)},
+            {"TILE_DIM0", CPLSPrintf("%.15g", poDS->m_dfTileDim0)},
+            {"TILE_MATRIX_WIDTH_0",
+             CPLSPrintf("%d", poDS->m_nTileMatrixWidth0)},
+            {"TILE_MATRIX_HEIGHT_0",
+             CPLSPrintf("%d", poDS->m_nTileMatrixHeight0)},
+        };
+
+        for (const auto &item : asConfigItems)
+        {
+            sqlite3_reset(poDS->m_hConfigInsertStmt);
+            sqlite3_bind_text(poDS->m_hConfigInsertStmt, 1, item.key, -1,
+                              SQLITE_STATIC);
+            sqlite3_bind_text(poDS->m_hConfigInsertStmt, 2, item.value.c_str(),
+                              -1, SQLITE_TRANSIENT);
+
+            if (sqlite3_step(poDS->m_hConfigInsertStmt) != SQLITE_DONE)
+            {
+                sqlite3_finalize(poDS->m_hConfigInsertStmt);
+                return nullptr;
+            }
+        }
+
+        sqlite3_finalize(poDS->m_hConfigInsertStmt);
+    }
+
     if (bMBTILES)
     {
         if (sqlite3_open_v2(pszFilename, &poDS->m_hDBMBTILES,
@@ -7172,7 +7301,8 @@ GDALDataset *OGRMVTWriterDataset::Create(const char *pszFilename, int nXSize,
                 "PRAGMA journal_mode = OFF;"
                 "PRAGMA temp_store = MEMORY;"
                 "CREATE TABLE metadata (name text, value text);"
-                "CREATE TABLE tiles (zoom_level integer, tile_column integer, "
+                "CREATE TABLE tiles (zoom_level integer, tile_column "
+                "integer, "
                 "tile_row integer, tile_data blob, "
                 "UNIQUE (zoom_level, tile_column, tile_row))") != OGRERR_NONE)
         {
@@ -7222,10 +7352,10 @@ GDALDataset *OGRMVTWriterDataset::CreateUpdate(GDALOpenInfo *poOpenInfo)
 
     if (VSIStatL(osTempDB.c_str(), &sStatBuf) != 0)
     {
-        CPLError(
-            CE_Failure, CPLE_AppDefined,
-            "Temporary database %s does not exist. Cannot proceed with update.",
-            osTempDB.c_str());
+        CPLError(CE_Failure, CPLE_AppDefined,
+                 "Temporary database %s does not exist. Cannot proceed "
+                 "with update.",
+                 osTempDB.c_str());
         return nullptr;
     }
 
@@ -7258,11 +7388,12 @@ GDALDataset *OGRMVTWriterDataset::CreateUpdate(GDALOpenInfo *poOpenInfo)
         SQLGetInteger64(hDB, "SELECT COUNT(*) FROM temp", nullptr);
 
     sqlite3_stmt *hInsertStmt = nullptr;
-    CPL_IGNORE_RET_VAL(sqlite3_prepare_v2(
-        hDB,
-        "INSERT INTO temp (z,x,y,layer,idx,feature,geomtype,area_or_length) "
-        "VALUES (?,?,?,?,?,?,?,?)",
-        -1, &hInsertStmt, nullptr));
+    CPL_IGNORE_RET_VAL(
+        sqlite3_prepare_v2(hDB,
+                           "INSERT INTO temp "
+                           "(z,x,y,layer,idx,feature,geomtype,area_or_length) "
+                           "VALUES (?,?,?,?,?,?,?,?)",
+                           -1, &hInsertStmt, nullptr));
     if (hInsertStmt == nullptr)
     {
         delete poDS;
@@ -7554,10 +7685,12 @@ void RegisterOGRMVT()
         "'For tilesets, extension of tiles'/>"
         "  <Option name='TILE_COUNT_TO_ESTABLISH_FEATURE_DEFN' type='int' "
         "description="
-        "'For tilesets without metadata file, maximum number of tiles to use "
+        "'For tilesets without metadata file, maximum number of tiles to "
+        "use "
         "to "
         "establish the layer schemas' default='1000'/>"
-        "  <Option name='JSON_FIELD' type='boolean' description='For tilesets, "
+        "  <Option name='JSON_FIELD' type='boolean' description='For "
+        "tilesets, "
         "whether to put all attributes as a serialized JSon dictionary'/>"
         "</OpenOptionList>");
 
@@ -7589,7 +7722,8 @@ void RegisterOGRMVT()
         "  <Option name='NAME' type='string' description='Tileset name'/>"
         "  <Option name='DESCRIPTION' type='string' "
         "description='A description of the tileset'/>"
-        "  <Option name='TYPE' type='string-select' description='Layer type' "
+        "  <Option name='TYPE' type='string-select' description='Layer "
+        "type' "
         "default='overlay'>"
         "    <Value>overlay</Value>"
         "    <Value>baselayer</Value>"
@@ -7606,10 +7740,18 @@ void RegisterOGRMVT()
         "description='Override default value for bounds metadata item'/>"
         "  <Option name='CENTER' type='string' "
         "description='Override default value for center metadata item'/>"
+        "  <Option name='PREPARE_FOR_UPDATE' type='bool' default='false'"
+        "description='Whether to prepare the tileset for updates (true) or not "
+        "(false)'/>"
+        "  <Option name='OGR_FID' type='string' "
+        "description='The name of an attribute (domain-level identifier) that "
+        "will be reported as the OGR FID in the context of tileset update "
+        "operations such as delete'/>"
         "  <Option name='TILING_SCHEME' type='string' "
         "description='Custom tiling scheme with following format "
         "\"EPSG:XXXX,tile_origin_upper_left_x,tile_origin_upper_left_y,"
-        "tile_dimension_zoom_0[,tile_matrix_width_zoom_0,tile_matrix_height_"
+        "tile_dimension_zoom_0[,tile_matrix_width_zoom_0,tile_matrix_"
+        "height_"
         "zoom_0]\"'/>"
         "</CreationOptionList>");
     std::cout << *poDriver->GetMetadata() << std::endl;
